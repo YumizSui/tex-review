@@ -15,9 +15,10 @@ anchored to the source text.
 
 ## Demo
 
-Comment navigation and source–PDF synchronization.
+Open the review editor, add a comment, revise the source, build the PDF, and reply
+and resolve the thread.
 
-![Comment navigation and PDF synchronization](docs/images/review-workflow.gif)
+![Recorded review workflow](docs/images/review-workflow.gif)
 
 ## Build from source
 

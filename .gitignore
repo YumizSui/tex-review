@@ -61,3 +61,7 @@ docs/adr/
 
 __pycache__/
 *.pyc
+
+# Local video recordings; publish the derived GIF only
+*.mp4
+*.mov
