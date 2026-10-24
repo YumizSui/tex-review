@@ -5,7 +5,7 @@
   "version": "0.6.15",
   "publisher": "furui-local",
   "license": "MIT",
-  "author": "Kairi Furui (YumizSui)",
+  "author": "Kairi Furui",
   "keywords": [
     "code review",
     "review",
@@ -179,5 +179,13 @@
     "@vscode/vsce": {
       "@azure/identity": "4.13.0"
     }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YumizSui/tex-review.git"
+  },
+  "homepage": "https://github.com/YumizSui/tex-review#readme",
+  "bugs": {
+    "url": "https://github.com/YumizSui/tex-review/issues"
   }
 }

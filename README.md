@@ -15,9 +15,6 @@ anchored to the source text.
 
 ## Demo
 
-Open the review editor, add a comment, revise the source, build the PDF, and reply
-and resolve the thread.
-
 ![Recorded review workflow](docs/images/review-workflow.gif)
 
 ## Build from source
@@ -63,6 +60,4 @@ extension.
 
 ## License
 
-MIT. Derived from [CodeReview.json](https://github.com/poalrom/vscode-local-code-review-extension)
-by Alex Popkov. See [LICENSE](LICENSE) and
-[third-party notices](THIRD_PARTY_NOTICES.md).
+MIT. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
