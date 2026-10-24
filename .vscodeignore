@@ -1,0 +1,21 @@
+# Package only the runtime and public end-user documentation.
+**
+!package.json
+!README.md
+!LICENSE
+!THIRD_PARTY_NOTICES.md
+!package.nls.json
+!package.nls.ja.json
+!dist/extension.js
+!media/comment.svg
+!media/editor.bundle.js
+!media/editor.css
+!media/onig.wasm
+!media/panel.css
+!media/panel.js
+!media/pdf.worker.mjs
+!l10n/bundle.l10n.json
+!l10n/bundle.l10n.ja.json
+!skills/review-comments/SKILL.md
+!docs/images/review-editor.png
+!docs/images/review-workflow.gif

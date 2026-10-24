@@ -1,0 +1,183 @@
+{
+  "name": "tex-review",
+  "displayName": "TeX Review",
+  "description": "Anchored review comments and bidirectional SyncTeX PDF navigation in a local TeX editor.",
+  "version": "0.6.15",
+  "publisher": "furui-local",
+  "license": "MIT",
+  "author": "Kairi Furui (YumizSui)",
+  "keywords": [
+    "code review",
+    "review",
+    "comments",
+    "ai",
+    "agent",
+    "local"
+  ],
+  "engines": {
+    "vscode": "^1.90.0",
+    "node": ">=22.12.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onCustomEditor:texReview.editor"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "texReview.open",
+        "title": "%command.open%",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "texReview.addComment",
+        "title": "%command.addComment%",
+        "icon": "$(comment-add)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "texReview.addComment",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m",
+        "when": "editorTextFocus"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "texReview.addComment",
+          "group": "navigation@9",
+          "when": "resourceScheme == file"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "texReview.open",
+          "group": "navigation@20",
+          "when": "resourceScheme == file"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "TeX Review",
+      "properties": {
+        "texReview.markerSide": {
+          "type": "string",
+          "enum": [
+            "left",
+            "right",
+            "none"
+          ],
+          "default": "left",
+          "description": "%config.markerSide%"
+        },
+        "texReview.pdfPath": {
+          "type": "string",
+          "default": "",
+          "description": "%config.pdfPath%"
+        },
+        "texReview.engine": {
+          "type": "string",
+          "enum": [
+            "lualatex",
+            "pdflatex",
+            "xelatex"
+          ],
+          "default": "lualatex",
+          "description": "%config.engine%"
+        },
+        "texReview.includePdfComments": {
+          "type": "boolean",
+          "default": false,
+          "description": "%config.includePdfComments%"
+        },
+        "texReview.pdfSync": {
+          "type": "string",
+          "enum": [
+            "manual",
+            "automatic"
+          ],
+          "enumDescriptions": [
+            "%config.pdfSync.manual%",
+            "%config.pdfSync.automatic%"
+          ],
+          "default": "manual",
+          "description": "%config.pdfSync%"
+        },
+        "texReview.buildMode": {
+          "type": "string",
+          "enum": [
+            "preview",
+            "full"
+          ],
+          "default": "preview",
+          "enumDescriptions": [
+            "%config.buildMode.preview%",
+            "%config.buildMode.full%"
+          ],
+          "description": "%config.buildMode%"
+        }
+      }
+    },
+    "customEditors": [
+      {
+        "viewType": "texReview.editor",
+        "displayName": "%editor.name%",
+        "selector": [
+          {
+            "filenamePattern": "*.tex"
+          }
+        ],
+        "priority": "option"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.js --production",
+    "watch": "node esbuild.js --watch",
+    "compile": "tsc --noEmit",
+    "test": "vitest run",
+    "package": "vsce package --allow-missing-repository --no-rewrite-relative-links"
+  },
+  "devDependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/legacy-modes": "^6.5.5",
+    "@codemirror/merge": "^6.12.2",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.14",
+    "@lezer/highlight": "^1.2.5",
+    "@types/node": "^22.20.5",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "3.9.2",
+    "esbuild": "^0.28.2",
+    "jsonc-parser": "^3.3.1",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^4.10.38",
+    "typescript": "^5.4.0",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.3.2"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Review files and local TeX tools require a trusted workspace."
+    },
+    "virtualWorkspaces": false
+  },
+  "l10n": "./l10n",
+  "overrides": {
+    "@vscode/vsce": {
+      "@azure/identity": "4.13.0"
+    }
+  }
+}

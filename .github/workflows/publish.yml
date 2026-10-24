@@ -1,0 +1,25 @@
+name: Validate and package
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm run compile
+      - run: npm run build
+      - run: mkdir -p releases && npm run package -- --out releases/tex-review.vsix
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tex-review-vsix
+          path: releases/*.vsix

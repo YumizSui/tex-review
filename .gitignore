@@ -1,0 +1,63 @@
+node_modules/
+dist/
+*.vsix
+.review/
+
+# Reproducible bundled web assets and local packages
+media/*.bundle.js
+media/pdf.worker.mjs
+releases/
+output/
+
+media/onig.wasm
+
+# Local instructions, agent state, and working notes (never publish)
+AGENTS.md
+CLAUDE.md
+CONTEXT.md
+SW_ZEN.md
+.claude/
+.codex/
+.cursor/
+.vscode/
+docs/agents/
+docs/superpowers/
+local/
+.private/
+.review/
+
+# Machine-specific state and credentials
+.DS_Store
+.env
+.env.*
+*.local
+*.log
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Other local agent/session artifacts
+.agents/
+.agent/
+HANDOFF*.md
+handoff*.md
+*.code-workspace
+
+# Local Japanese translations; English documentation is the public source
+*.ja.md
+
+# Example build products
+examples/**/build/
+examples/**/*.aux
+examples/**/*.fls
+examples/**/*.fdb_latexmk
+examples/**/*.out
+examples/**/*.pdf
+examples/**/*.synctex.gz
+
+# Internal architecture history
+docs/adr/
+
+__pycache__/
+*.pyc

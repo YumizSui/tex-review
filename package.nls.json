@@ -1,0 +1,15 @@
+{
+  "command.open": "TeX Review: Open review editor",
+  "command.addComment": "TeX Review: Add comment to selection",
+  "config.markerSide": "Comment gutter in the review editor: left, right, or hidden.",
+  "config.pdfPath": "Workspace-relative PDF path. Leave blank for automatic detection. Use the PDF beside its SyncTeX file.",
+  "editor.name": "TeX Review",
+  "config.engine": "TeX engine used for builds in the review editor.",
+  "config.includePdfComments": "Export PDF comment annotations after building. The original PDF is preserved.",
+  "config.pdfSync": "Source-to-PDF synchronization. Clicking the PDF to navigate to source works in both modes.",
+  "config.pdfSync.manual": "Move the PDF only when the Sync PDF button is pressed.",
+  "config.pdfSync.automatic": "Automatically follow the source cursor in the PDF.",
+  "config.buildMode": "Build mode. The first build and comment-PDF exports always use a full build.",
+  "config.buildMode.preview": "Run TeX once using existing auxiliary files for a faster preview. References may need a full build.",
+  "config.buildMode.full": "Run latexmk until references and bibliography are up to date."
+}
