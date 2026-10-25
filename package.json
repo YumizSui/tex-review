@@ -2,7 +2,7 @@
   "name": "tex-review",
   "displayName": "TeX Review Studio",
   "description": "Anchored review comments and bidirectional SyncTeX PDF navigation in a local TeX editor.",
-  "version": "0.6.17",
+  "version": "0.6.18",
   "publisher": "yumizsui",
   "license": "MIT",
   "author": "Kairi Furui",

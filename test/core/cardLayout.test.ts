@@ -1,5 +1,5 @@
 import { describe,it,expect } from 'vitest';
-import { layoutCards, layoutViewportCards } from '../../src/core/cardLayout';
+import { commentBottomPadding, layoutCards, layoutViewportCards } from '../../src/core/cardLayout';
 describe('focused comment alignment', () => {
   const cards=[{id:'a',anchor:90,height:150},{id:'b',anchor:110,height:100},{id:'c',anchor:130,height:80}];
   it('pins a focused middle card and moves neighbors in both directions',()=>{
@@ -64,5 +64,20 @@ describe('focused comment alignment', () => {
     const first=layoutViewportCards(cards,null,700);
     layoutViewportCards(cards.map(c=>({...c,anchor:c.anchor-400})),null,700);
     expect(layoutViewportCards(cards,null,700)).toEqual(first);
+  });
+});
+
+describe('end-of-source comment scroll range', () => {
+  it('reserves room for a long final discussion without changing its source anchor', () => {
+    expect(commentBottomPadding([{id:'end',anchor:250,height:220}],300)).toBe(182);
+  });
+  it('accounts for several discussions on the same final line', () => {
+    const cards=[{id:'a',anchor:100,height:200},{id:'b',anchor:100,height:180},{id:'c',anchor:100,height:300}];
+    expect(commentBottomPadding(cards,150)).toBe(662);
+    expect(commentBottomPadding(cards.map(c=>({...c,anchor:c.anchor-500})), -350)).toBe(662);
+  });
+  it('removes extra space when comments are hidden or finish before the source', () => {
+    expect(commentBottomPadding([],300)).toBe(0);
+    expect(commentBottomPadding([{id:'early',anchor:30,height:100}],300)).toBe(0);
   });
 });

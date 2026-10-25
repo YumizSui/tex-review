@@ -16,7 +16,7 @@ import * as pdfjs from 'pdfjs-dist';
 import { anchor } from '../src/core/anchor';
 import { commentHighlights } from '../src/core/commentHighlights';
 import { adjacentComment } from '../src/core/commentNavigation';
-import { layoutViewportCards } from '../src/core/cardLayout';
+import { commentBottomPadding, layoutViewportCards } from '../src/core/cardLayout';
 
 const api = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
@@ -111,9 +111,16 @@ function measureLayout() {
     measured.push({ ...entry, id, anchor: anchorTop, height: entry.element.getBoundingClientRect().height, label: thread ? threadLabel(thread, target) : null, order: measured.length });
   }
   measured.sort((a, b) => a.anchor - b.anchor || (a.id === selectedThread ? 0 : 1) - (b.id === selectedThread ? 0 : 1) || a.order - b.order);
-  return { measured, height, tops: layoutViewportCards(measured, selectedThread, height) };
+  const sourceBottom = documentTop + editor.lineBlockAt(editor.state.doc.length).bottom - area.top;
+  return { measured, height, tops: layoutViewportCards(measured, selectedThread, height),
+    bottomPadding: commentBottomPadding(measured, sourceBottom) };
 }
 function applyLayout(result) {
+  const padding = result?.bottomPadding || 0;
+  if (Math.abs((parseFloat(editor.dom.style.getPropertyValue('--review-comment-overflow')) || 0) - padding) > 1) {
+    editor.dom.style.setProperty('--review-comment-overflow', `${padding}px`);
+    scheduleLayout();
+  }
   if (!result) return;
   const { measured, height, tops } = result;
   measured.forEach((card, i) => {
@@ -476,9 +483,17 @@ $('dismissDelete').addEventListener('click', () => { $('deletionNotice').hidden 
 const scrollComments = commentScrollHandler(
   { get scrollTop() { return editor?.scrollDOM.scrollTop || 0; }, set scrollTop(value) { if (editor) editor.scrollDOM.scrollTop = value; },
     get clientHeight() { return editor?.scrollDOM.clientHeight || 0; } },
-  target => {
+  (target, event) => {
     for (let element = target instanceof Element ? target : target?.parentElement; element && element !== $('comments'); element = element.parentElement) {
-      if (element.scrollHeight > element.clientHeight + 1 && /^(auto|scroll)$/.test(getComputedStyle(element).overflowY)) return element;
+      if (element.scrollHeight > element.clientHeight + 1 && /^(auto|scroll)$/.test(getComputedStyle(element).overflowY)) {
+        if (element.classList.contains('card')) {
+          const bounds = element.getBoundingClientRect(), rail = $('cards').getBoundingClientRect();
+          // A clipped card cannot reveal its footer by scrolling internally.
+          // Move its source anchor into view first, preserving gesture ownership.
+          if ((event.deltaY > 0 && bounds.bottom > rail.bottom + 1) || (event.deltaY < 0 && bounds.top < rail.top)) return null;
+        }
+        return element;
+      }
     }
     return null;
   },

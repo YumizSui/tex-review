@@ -12,6 +12,15 @@ export function layoutCards(cards: CardMeasure[], focusedId: string | null, gap 
   return tops;
 }
 
+/** Reserve enough source scroll range to read the last packed card. Both inputs
+ * use viewport coordinates, so the result stays fixed as the source scrolls. */
+export function commentBottomPadding(cards: CardMeasure[], sourceBottom: number, gap = 10, margin = 12): number {
+  if (!cards.length) return 0;
+  const tops = layoutCards(cards, null, gap);
+  const last = cards.length - 1;
+  return Math.max(0, tops[last] + cards[last].height + margin - sourceBottom);
+}
+
 /** Interpolate adjacent source-aligned layouts instead of jumping to a new pivot.
  * Each endpoint packs the same cards without overlap, so interpolation preserves
  * spacing. Equal source positions use one representative to keep the handover
