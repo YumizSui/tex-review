@@ -230,9 +230,17 @@ body.vscode-high-contrast, body.vscode-high-contrast-light { --tex-command: var(
 #commentHeader { flex: none; height: auto; min-height: 34px; padding: 6px 10px; flex-wrap: wrap; row-gap: 4px; }
 .comment-scope { flex-shrink: 0; }
 .scope-button { white-space: nowrap; }
-#commentBody { position: relative; flex: 1; min-height: 0; overflow: hidden; }
-#cards { overflow: hidden; }
+#commentBody { position: relative; flex: 1; min-height: 0; overflow: clip; }
+#cards { overflow: clip; }
 #commentOverview { top: 0; }
+
+#commentSearchRow { flex-basis: 100%; min-width: 0; }
+#commentSearchRow[hidden] { display: none; }
+#commentSearch { width: 100%; padding: 3px 6px; font-size: 11px; }
+#commentHeader > .icon-button { width: 22px; height: 22px; padding: 3px; flex-shrink: 0; }
+#filterCommentTags.is-filtered { color: var(--vscode-focusBorder); background: var(--vscode-toolbar-activeBackground); }
+.thread-tags { color: var(--vscode-descriptionForeground); font-size: 10px; margin-top: 5px; }
+#commentEmpty { position: absolute; inset: 0; margin: 0; pointer-events: none; }
 
 /* Manual reading uses a normal scrollable list. Align only on explicit selection. */
 #commentBody { overflow: clip; }

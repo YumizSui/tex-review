@@ -1,3 +1,4 @@
+import type { CommentTag } from './commentFilters';
 import { VersionedAnchor } from './commentAnchors';
 // 1-based inclusive line range, matching editor display.
 export interface LineRange {
@@ -22,6 +23,7 @@ export interface Thread {
   id: string;
   file: string; // workspace-relative path
   range: LineRange;
+  tags?: CommentTag[];
   snapshot: string; // original quoted text; versioned positions are authoritative
   anchor?: VersionedAnchor;
   sourceDirty?: boolean;
@@ -38,6 +40,7 @@ export interface ReviewView {
 }
 
 export interface AddThreadEvent {
+  tags?: CommentTag[];
   op: 'add_thread';
   anchor?: VersionedAnchor;
   id: string;
@@ -100,7 +103,12 @@ export interface SetAnchorsEvent {
   ts: string;
 }
 
+export interface SetTagsEvent {
+  op: 'set_tags'; thread: string; tags: CommentTag[]; ts: string;
+}
+
 export type ReviewEvent =
+  | SetTagsEvent
   | SetAnchorsEvent
   | AddThreadEvent
   | ReplyEvent

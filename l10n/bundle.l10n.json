@@ -123,5 +123,19 @@
   "Recover AI edit": "Recover AI edit",
   "File": "File",
   "Source file": "Source file",
-  "All": "All"
+  "All": "All",
+  "Action required": "Action required",
+  "Question": "Question",
+  "TODO": "TODO",
+  "Note": "Note",
+  "Edit tags…": "Edit tags…",
+  "Copy comment link": "Copy comment link",
+  "Comment options": "Comment options",
+  "Comment tags": "Comment tags",
+  "Filter comments by tag": "Filter comments by tag",
+  "Search comments": "Search comments",
+  "No matching comments.": "No matching comments.",
+  "Comment link copied": "Comment link copied",
+  "Open the comment link in its original workspace.": "Open the comment link in its original workspace.",
+  "Review not found.": "Review not found."
 }

@@ -123,5 +123,19 @@
   "File": "ファイル",
   "Source file": "本文ファイル",
   "Recover AI edit": "AIの変更を復旧",
-  "All": "すべて"
+  "All": "すべて",
+  "Action required": "要対応",
+  "Question": "質問",
+  "TODO": "TODO",
+  "Note": "メモ",
+  "Edit tags…": "タグを編集…",
+  "Copy comment link": "コメントへのリンクをコピー",
+  "Comment options": "コメントの操作",
+  "Comment tags": "コメントのタグ",
+  "Filter comments by tag": "タグで絞り込む",
+  "Search comments": "コメントを検索",
+  "No matching comments.": "一致するコメントはありません。",
+  "Comment link copied": "コメントへのリンクをコピーしました",
+  "Open the comment link in its original workspace.": "リンク元のワークスペースを開いてください。",
+  "Review not found.": "レビューが見つかりません。"
 }

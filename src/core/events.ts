@@ -1,3 +1,4 @@
+import { commentTags } from './commentFilters';
 import { ReviewEvent, ReviewView, Thread } from './types';
 
 export function fold(name: string, events: ReviewEvent[], includeDeleted = false): ReviewView {
@@ -13,6 +14,7 @@ export function fold(name: string, events: ReviewEvent[], includeDeleted = false
         byId.set(e.id, {
           id: e.id,
           file: e.file,
+          tags: commentTags(e.tags),
           range: e.range,
           snapshot: e.snapshot,
           ...(e.anchor ? { anchor: e.anchor } : {}),
@@ -21,6 +23,11 @@ export function fold(name: string, events: ReviewEvent[], includeDeleted = false
           comments: [{ id: `${e.id}.c1`, author: e.author, body: e.body, createdAt: e.ts }],
         });
         order.push(e.id);
+        break;
+      }
+      case 'set_tags': {
+        const thread = byId.get(e.thread);
+        if (thread) byId.set(thread.id, { ...thread, tags: commentTags(e.tags) });
         break;
       }
       case 'set_anchors': {

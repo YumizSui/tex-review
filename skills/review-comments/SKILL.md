@@ -10,6 +10,22 @@ the human-friendly **view**; make changes by **appending events** to the log.
 Never edit the `.view.json` (the extension owns it) and never rewrite the log —
 only append. This keeps you race-free with the live extension.
 
+## Comment intent
+
+Read `tags` before acting. Missing or empty tags mean `action` (Action required).
+For `question` alone, answer first; do not assume it requests a source edit.
+`question` with `action` requests both an answer and a correction. `todo` marks
+deferred work; process it when it is within the user's requested scope. `note`
+alone is informational. Tags can be combined and do not change resolved status.
+Follow workspace instructions for replies and resolution; completing an edit
+does not itself authorize resolving or deleting the thread.
+
+Comment links identify a workspace, review, and stable thread ID, not a source
+line. The query is base64url-encoded UTF-8 JSON with `workspace`, `review`, and
+`thread`; validate the workspace and read that thread's current anchor before editing. The editor's File/All
+search includes visible comment bodies and replies; it is not a full-workspace
+TeX search.
+
 ## Source changes
 
 When changing a reviewed TeX passage, prefer the extension's

@@ -1,3 +1,4 @@
+import { parseCommentLink } from './core/commentLinks';
 import { startSourceApi } from './vscode/sourceApi';
 import { trackSources } from './vscode/sourceTracking';
 import * as vscode from 'vscode';
@@ -28,6 +29,13 @@ function initialize(context: vscode.ExtensionContext): void {
   ensureApi();
   context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(doc => { if (doc.uri.fsPath.endsWith('.tex')) ensureApi(); }));
   const editor = new ReviewEditor(context, folder, service);
+  context.subscriptions.push(vscode.window.registerUriHandler({async handleUri(uri) {
+    try {
+      const target = parseCommentLink(uri);
+      if (fs.realpathSync(target.workspace) !== fs.realpathSync(folder.uri.fsPath)) throw new Error(vscode.l10n.t('Open the comment link in its original workspace.'));
+      await editor.openThread(target.review,target.thread);
+    } catch(error) { void vscode.window.showErrorMessage(`TeX Review: ${String(error)}`); }
+  }}));
   context.subscriptions.push(vscode.window.registerCustomEditorProvider(ReviewEditor.viewType, editor,
     { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false }));
   context.subscriptions.push(vscode.window.registerWebviewPanelSerializer('texReview.session', { deserializeWebviewPanel: (panel, state) => editor.restore(panel, state) }));

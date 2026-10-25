@@ -1,3 +1,4 @@
+import { commentTagLabels, commentTags, commentMatches, commentPreview } from '../src/core/commentFilters';
 import { commentScrollHandler } from './commentScroll.js';
 import { performanceMonitor } from './performance.js';
 import { documentUpdate } from '../src/core/documentSync';
@@ -27,6 +28,7 @@ let drafts = previous.drafts || {}, cards = new Map(), selectedThread = null, ac
 let openNativeRequested = false, pendingNavigation = null, navigationSent = false, pendingThread = null;
 const sourceStates = new Map();
 let overview = previous.overview || false;
+let commentQuery = previous.commentQuery || '', tagFilter = previous.tagFilter || [];
 const closedOverviewFiles = new Set(previous.closedOverviewFiles || []);
 const savedComposers = previous.composers || {};
 let pendingChanges = ChangeSet.empty(0), pendingReview = null, pendingComment = null;
@@ -55,7 +57,7 @@ const timings = performanceMonitor(entry => send('performance', entry));
 timings.observe();
 const saveState = () => {
   if (review.file) { if (draftTarget) savedComposers[review.file] = draftTarget; else delete savedComposers[review.file]; }
-  api.setState({ drafts, composers: savedComposers, conflictDraft, file: review.file, overview, closedOverviewFiles: [...closedOverviewFiles], commentScrollTop: $('cards').scrollTop, commentPadding: parseFloat($('cards').style.paddingTop) || 10, scrollTop: editor?.scrollDOM.scrollTop,
+  api.setState({ drafts, composers: savedComposers, conflictDraft, file: review.file, overview, commentQuery, tagFilter, closedOverviewFiles: [...closedOverviewFiles], commentScrollTop: $('cards').scrollTop, commentPadding: parseFloat($('cards').style.paddingTop) || 10, scrollTop: editor?.scrollDOM.scrollTop,
     showPdf: $('showPdf').checked, showComments: $('showComments').checked });
 };
 const make = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; };
@@ -162,7 +164,7 @@ function orderCommentCards() {
 
 function refreshDecorations() {
   if (!editor) return;
-  const ranges = review.threads.filter(t => t.file === review.file && t.status === 'open').map(locate)
+  const ranges = review.threads.filter(t => t.file === review.file && t.status === 'open' && commentMatches(t, commentQuery, tagFilter)).map(locate)
     .filter(t => !t.outdated && t.to > t.from)
     .map(t => ({ from: t.from, to: t.to, selected: t.id === selectedThread }));
   if (draftTarget?.to > draftTarget?.from) ranges.push({ from: draftTarget.from, to: draftTarget.to, selected: true });
@@ -223,6 +225,10 @@ function markerExtension(side) {
   });
 }
 function initialize(msg) {
+  if (msg.selection?.thread) {
+    commentQuery = ''; tagFilter = []; $('commentSearch').value = ''; updateTagFilter();
+    if (msg.showResolved) $('resolved').checked = true;
+  }
   if (editor) {
     sourceStates.set(review.file, { state: editor.state, scrollTop: editor.scrollDOM.scrollTop, commentScrollTop: $('cards').scrollTop, commentPadding: parseFloat($('cards').style.paddingTop) || 10, draftTarget,
       conflictDraft, selectedThread });
@@ -343,9 +349,9 @@ function focusCard(id) {
   refreshDecorations();
 }
 function visibleThreads() {
-  return review.threads.filter(thread => thread.file === review.file && ($('resolved').checked || thread.status === 'open'));
+  return review.threads.filter(thread => thread.file === review.file && ($('resolved').checked || thread.status === 'open') && commentMatches(thread, commentQuery, tagFilter));
 }
-function manuscriptThreads() { return projectComments(review.threads, review.files || [review.file], $('resolved').checked); }
+function manuscriptThreads() { return projectComments(review.threads.filter(thread => commentMatches(thread, commentQuery, tagFilter)), review.files || [review.file], $('resolved').checked); }
 function jumpThread(thread) {
   if (overview && closedOverviewFiles.delete(thread.file)) saveState();
   if (thread.file !== review.file) {
@@ -382,8 +388,9 @@ function finishNavigation() {
 }
 function renderOverview() {
   const threads = manuscriptThreads();
+  $('commentEmpty').hidden = overview || visibleThreads().length > 0 || cards.has('new') || !(commentQuery || tagFilter.length);
   $('previousComment').disabled = $('nextComment').disabled = threads.length === 0;
-  $('overviewCount').textContent = review.threads.filter(thread => (review.files || []).includes(thread.file) && thread.status === 'open').length || '';
+  $('overviewCount').textContent = review.threads.filter(thread => (review.files || []).includes(thread.file) && thread.status === 'open' && commentMatches(thread, commentQuery, tagFilter)).length || '';
   const list = $('commentOverview');
   list.hidden = !overview; $('cards').hidden = overview;
   $('currentComments').classList.toggle('active', !overview); $('allComments').classList.toggle('active', overview);
@@ -391,7 +398,7 @@ function renderOverview() {
   if (!overview) return;
   const scrollTop = list.scrollTop;
   list.replaceChildren();
-  if (!threads.length) { list.append(make('p', t('No comments in this manuscript.'), 'overview-empty')); return; }
+  if (!threads.length) { list.append(make('p', t(commentQuery || tagFilter.length ? 'No matching comments.' : 'No comments in this manuscript.'), 'overview-empty')); return; }
   const counts = new Map();
   for (const thread of threads) counts.set(thread.file, (counts.get(thread.file) || 0) + 1);
   let group;
@@ -418,11 +425,37 @@ function renderOverview() {
     const entry = button(undefined, () => { overview = false; jumpThread(thread); renderOverview(); scheduleLayout(); saveState(); });
     entry.className = 'overview-comment' + (selectedThread === thread.id ? ' active' : '');
     entry.setAttribute('aria-current', String(selectedThread === thread.id));
-    entry.append(make('small', t('Line {0}', thread.range.startLine)), make('span', thread.comments[0]?.body || thread.snapshot));
+    entry.append(make('small', t('Line {0}', thread.range.startLine)), make('span', commentPreview(thread, commentQuery)));
     group.append(entry);
   }
   list.scrollTop = scrollTop;
 }
+function updateTagFilter() {
+  const active = tagFilter.length > 0;
+  $('filterCommentTags').classList.toggle('is-filtered', active);
+  $('filterCommentTags').setAttribute('aria-pressed', String(active));
+  $('filterCommentTags').title = active ? tagFilter.map(tag => t(commentTagLabels[tag])).join(' · ') : t('Filter comments by tag');
+}
+$('toggleCommentSearch').addEventListener('click', () => {
+  const row = $('commentSearchRow'); row.hidden = !row.hidden;
+  if (!row.hidden) $('commentSearch').focus();
+  else { commentQuery = ''; $('commentSearch').value = ''; renderComments(); saveState(); }
+  scheduleLayout();
+});
+let commentSearchTimer;
+$('commentSearch').value = commentQuery;
+$('commentSearchRow').hidden = !commentQuery;
+$('commentSearch').addEventListener('input', () => {
+  clearTimeout(commentSearchTimer);
+  commentSearchTimer = setTimeout(() => { commentQuery = $('commentSearch').value; renderComments(); saveState(); }, 100);
+});
+$('commentSearch').addEventListener('keydown', event => {
+  if (event.key !== 'Escape' || event.isComposing) return;
+  event.preventDefault(); clearTimeout(commentSearchTimer); commentQuery = ''; $('commentSearch').value = ''; $('commentSearchRow').hidden = true;
+  renderComments(); saveState(); $('toggleCommentSearch').focus();
+});
+$('filterCommentTags').addEventListener('click', () => send('chooseTagFilter', {tags:tagFilter}));
+updateTagFilter();
 $('allComments').addEventListener('click', () => { overview = true; renderOverview(); saveState(); });
 $('currentComments').addEventListener('click', () => { overview = false; renderOverview(); scheduleLayout(); saveState(); });
 $('sources').addEventListener('change', () => requestNavigation({ file: $('sources').value }));
@@ -436,11 +469,12 @@ function renderComments() {
   const focusedSelection = focusedInput ? [focusedInput.selectionStart, focusedInput.selectionEnd] : null;
   let restoreInput = null;
   const threads = visibleThreads();
+  $('commentCount').textContent = review.threads.filter(thread => thread.file === review.file && thread.status === 'open' && commentMatches(thread, commentQuery, tagFilter)).length || '';
   renderOverview();
   for (const thread of threads) {
     currentIds.add(thread.id);
     const loc = locate(thread);
-    const signature = JSON.stringify([thread.status, thread.comments, loc.status, loc.outdated]);
+    const signature = JSON.stringify([thread.status, thread.tags, thread.comments, loc.status, loc.outdated]);
     if (cards.get(thread.id)?.signature === signature) continue;
     const old = cards.get(thread.id), scrollTop = old?.element.scrollTop || 0, replySaved = old?.replySaved; const focus = document.activeElement?.dataset?.draft === key(thread.id);
     const selection = focus ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
@@ -454,8 +488,13 @@ function renderComments() {
       selectedThread = thread.id; requestCommentAlignment(); editor.dispatch({ selection: { anchor: current.from, head: current.to }, effects: EditorView.scrollIntoView(current.from, { y: 'center' }) });
       refreshDecorations(); editor.focus(); forward();
     }), button(thread.status === 'resolved' ? t('Reopen') : t('Resolve'), () => send(thread.status === 'resolved' ? 'reopen' : 'resolve', { thread: thread.id, review: review.active })),
-      button(t('Delete thread'), () => send('deleteThread', { thread: thread.id, review: review.active })));
+      button('…', () => send('threadActions', { thread: thread.id, review: review.active })));
+    head.lastElementChild.setAttribute('aria-label', t('Comment options'));
+    head.lastElementChild.title = t('Comment options');
     card.append(head);
+    const tags = make('div', undefined, 'thread-tags');
+    tags.textContent = commentTags(thread.tags).map(tag => t(commentTagLabels[tag])).join(' · ');
+    card.append(tags);
     if (loc.outdated) {
       const reattach = button(t('Attach to selected text'), () => {
         if (editor.state.selection.main.empty || inflight !== null || editor.state.doc.toString() !== confirmed) {
@@ -538,7 +577,7 @@ function updateComposer() {
 }
 function compose() {
   if (!editor) return;
-  $('showComments').checked = true; setColumns();
+  $('showComments').checked = true; setColumns(); $('commentEmpty').hidden = true;
   if (cards.has('new')) { cards.get('new').element.querySelector('textarea').focus(); return; }
   draftTarget = { ...snapshotSelection(), status: 'attached' };
   const card = make('article', undefined, 'card composer');
@@ -732,6 +771,8 @@ window.addEventListener('message', event => timings.measure(`message.${event.dat
     editor.dispatch({ selection: { anchor: Math.min(length, m.from), head: Math.min(length, m.to) }, effects: EditorView.scrollIntoView(Math.min(length, m.from), { y: 'center' }) });
     if (m.compose) compose(); else editor.focus();
   }
+  else if (m.type === 'tagFilter') { tagFilter = m.tags; updateTagFilter(); renderComments(); saveState(); }
+  else if (m.type === 'linkCopied') $('status').textContent = t('Comment link copied');
   else if (m.type === 'transaction') { editor.dispatch({effects:transactionConfig.reconfigure(EditorState.readOnly.of(!!m.busy))}); $('status').textContent = m.busy ? t('AI edit pending') : t('Changes applied'); }
   else if (m.type === 'syntax') {
     if (m.version !== version || inflight || editor.state.doc.toString() !== confirmed) return;

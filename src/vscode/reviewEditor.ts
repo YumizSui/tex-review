@@ -1,3 +1,5 @@
+import { commentTagIds, commentTagLabels, commentTags } from '../core/commentFilters';
+import { commentLink } from '../core/commentLinks';
 import { ChangeSet } from '@codemirror/state';
 import { followDraftTarget } from '../core/draftTarget';
 import { sourceText, offsets, lineRange } from '../core/commentAnchors';
@@ -29,7 +31,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
   private sessionSource?: string;
   private sessionReady = false;
   private pendingOpen?: object;
-  private selections = new Map<string, { from: number; to: number; compose?: boolean }>();
+  private selections = new Map<string, { from?: number; to?: number; compose?: boolean; thread?: string; showResolved?: boolean }>();
   private selectedRoot?: string;
   private nativeSyntax?: ReturnType<typeof workbenchSyntax>;
   private nativeSyntaxTheme = "";
@@ -67,7 +69,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
     await this.openSource(editor.document, { from: normalizedOffset(editor.selection.start), to: normalizedOffset(editor.selection.end), compose });
   }
 
-  private async openSource(document: vscode.TextDocument, selection?: { from: number; to: number; compose?: boolean }): Promise<void> {
+  private async openSource(document: vscode.TextDocument, selection?: { from?: number; to?: number; compose?: boolean; thread?: string; showResolved?: boolean }): Promise<void> {
     const file = path.relative(this.folder.uri.fsPath, document.uri.fsPath);
     workspaceFile(this.folder.uri.fsPath, file);
     if (this.session) {
@@ -85,6 +87,15 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
       { enableScripts: true, retainContextWhenHidden: true });
     this.session = panel;
     await this.attachSession(document, panel);
+  }
+
+  async openThread(review: string, id: string): Promise<void> {
+    if (!this.service.list().includes(review)) throw new Error(vscode.l10n.t('Review not found.'));
+    const thread = this.service.view(review).threads.find(thread => thread.id === id);
+    if (!thread) throw new Error(vscode.l10n.t('Comment not found.'));
+    this.service.setActive(review);
+    await this.openSource(await vscode.workspace.openTextDocument(vscode.Uri.file(workspaceFile(this.folder.uri.fsPath, thread.file))),
+      {thread:thread.id, showResolved:thread.status==='resolved'});
   }
 
   async restore(panel: vscode.WebviewPanel, state?: unknown): Promise<void> {
@@ -160,7 +171,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
     };
     const postSource = (kind = 'source', selection?: object, thread?: string) => {
       post({ type: kind, text: normalizedText().toString(), version: document.version, file,
-        selection, thread, transactionPending: this.service.transactionPending, config: config(),
+        selection, thread: thread || (selection as {thread?:string} | undefined)?.thread, showResolved: (selection as {showResolved?:boolean} | undefined)?.showResolved, transactionPending: this.service.transactionPending, config: config(),
         worker: panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'pdf.worker.mjs')).toString() });
     };
     const switchSource = async (nextFile: string, selection?: object, thread?: string) => {
@@ -423,6 +434,45 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
           if (this.pendingOpen) { post(this.pendingOpen); this.pendingOpen = undefined; }
           return;
         }
+        if (m.type === 'chooseTagFilter') {
+          void (async () => {
+            const picked = await vscode.window.showQuickPick(commentTagIds.map(tag => ({label:vscode.l10n.t(commentTagLabels[tag]), tag,
+              picked:Array.isArray(m.tags) && m.tags.includes(tag)})), {canPickMany:true,title:vscode.l10n.t('Filter comments by tag')});
+            if (picked) post({type:'tagFilter',tags:picked.map(item=>item.tag)});
+          })().catch(error => post({type:'error',error:String(error.message || error)}));
+          return;
+        }
+        if (m.type === 'threadActions') {
+          const active = this.service.active();
+          if (m.review !== active || !active) throw new Error(vscode.l10n.t('The active review changed. Please try again.'));
+          const thread = this.service.view(active).threads.find(thread => thread.id === m.thread);
+          if (!thread) throw new Error(vscode.l10n.t('Comment not found.'));
+          void (async () => {
+            const choice = await vscode.window.showQuickPick([
+              {label:'$(tag) '+vscode.l10n.t('Edit tags…'),action:'tags'},
+              {label:'$(link) '+vscode.l10n.t('Copy comment link'),action:'link'},
+              {label:'$(trash) '+vscode.l10n.t('Delete thread'),action:'delete'},
+            ], {title:vscode.l10n.t('Comment options')});
+            if (!choice || disposed) return;
+            if (choice.action === 'link') {
+              await vscode.env.clipboard.writeText(commentLink(vscode.env.uriScheme,this.context.extension.id,{workspace:root,review:active,thread:thread.id}));
+              post({type:'linkCopied'});return;
+            }
+            if (choice.action === 'tags') {
+              const picked = await vscode.window.showQuickPick(commentTagIds.map(tag => ({label:vscode.l10n.t(commentTagLabels[tag]),tag,picked:commentTags(thread.tags).includes(tag)})),
+                {canPickMany:true,title:vscode.l10n.t('Comment tags')});
+              if (!picked || disposed) return;
+              if (this.service.active() !== active) throw new Error(vscode.l10n.t('The active review changed. Please try again.'));
+              this.service.apply({op:'set_tags',thread:thread.id,tags:commentTags(picked.map(item=>item.tag)),ts:nowIso()},active);
+              review();return;
+            }
+            if (this.service.active() !== active) throw new Error(vscode.l10n.t('The active review changed. Please try again.'));
+            this.service.apply({op:'delete_thread',thread:thread.id,ts:nowIso()},active);
+            undoDeletion = {review:active,event:{op:'restore_thread',thread:thread.id,ts:nowIso()}};
+            post({type:'deleted'});review();
+          })().catch(error=>post({type:'error',error:String(error.message || error)}));
+          return;
+        }
         if (m.type === 'reviewActions') {
           // Native workbench UI; keep modal interactions outside the document edit queue.
           void (async () => {
@@ -656,7 +706,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
 </div><select id="sources" class="target-select source-select" aria-label="${tr('Source file')}" title="${tr('Source file')}"></select><div id="comparisonBar" hidden><span id="baselineLabel"></span><button id="previousChange" class="icon-button" title="${tr('Previous change')}" aria-label="${tr('Previous change')}">${icon('left')}</button><button id="nextChange" class="icon-button" title="${tr('Next change')}" aria-label="${tr('Next change')}">${icon('right')}</button><button id="refreshBaseline" class="icon-button" title="${tr('Refresh baseline')}" aria-label="${tr('Refresh baseline')}">${icon('sync')}</button></div><span id="status" role="status"></span><span class="spacer"></span><nav id="pdfControls" class="pdf-toolbar"><button id="buildPdf" class="icon-button" aria-label="${tr('Build PDF')}" title="${tr('Build PDF')}">${icon('build')}</button><select id="buildMode" class="target-select build-mode" aria-label="${tr('Build mode')}" title="${tr('Build mode')}"><option value="preview" title="${tr('Draft build (one TeX pass)')}">${tr('Draft')}</option><option value="full" title="${tr('Full build (references and bibliography)')}">${tr('Full')}</option></select><select id="roots" class="target-select" aria-label="${tr('Build target')}" title="${tr('Build target')}"></select><button id="selectPdf" class="icon-button" aria-label="${tr('Select PDF')}" title="${tr('Select PDF')}">${icon('file')}</button><button id="prevPage" class="icon-button" title="${tr('Previous page')}" aria-label="${tr('Previous page')}">${icon('left')}</button><input id="pageNumber" aria-label="${tr('PDF page')}" type="number" min="1" value="1"><span id="pageCount"></span><button id="nextPage" class="icon-button" title="${tr('Next page')}" aria-label="${tr('Next page')}">${icon('right')}</button><span class="toolbar-divider"></span><button id="syncPdf" class="icon-button" title="${tr('Sync PDF')}" aria-label="${tr('Sync PDF')}">${icon('sync')}</button></nav><button id="reviewMenu" class="icon-button" title="${tr('Review options')}" aria-label="${tr('Review options')}">${icon('more')}</button></header>
       <div id="deletionNotice" role="status" hidden><span>${tr('Deleted.')}</span><button id="undoDelete">${tr('Undo')}</button><button id="dismissDelete" aria-label="${tr('Dismiss')}">×</button></div>
       <div id="error" role="alert"></div>
-      <div id="workspace"><aside id="comments"><div id="commentHeader"><div class="comment-scope"><button id="currentComments" class="scope-button active" aria-pressed="true">${tr('File')} <span id="commentCount" class="count"></span></button><button id="allComments" class="scope-button" aria-pressed="false">${tr('All')} <span id="overviewCount" class="count"></span></button></div><nav class="comment-navigation" aria-label="${tr('Comment navigation')}"><button id="previousComment" class="icon-button" disabled title="${tr('Previous comment')}" aria-label="${tr('Previous comment')}">${icon('up')}</button><button id="nextComment" class="icon-button" disabled title="${tr('Next comment')}" aria-label="${tr('Next comment')}">${icon('down')}</button></nav><label class="resolved-filter" title="${tr('Show resolved')}"><input id="resolved" type="checkbox">${tr('Resolved')}</label></div><div id="commentBody"><div id="cards"></div><div id="commentOverview" hidden></div></div></aside>
+      <div id="workspace"><aside id="comments"><div id="commentHeader"><div class="comment-scope"><button id="currentComments" class="scope-button active" aria-pressed="true">${tr('File')} <span id="commentCount" class="count"></span></button><button id="allComments" class="scope-button" aria-pressed="false">${tr('All')} <span id="overviewCount" class="count"></span></button></div><nav class="comment-navigation" aria-label="${tr('Comment navigation')}"><button id="previousComment" class="icon-button" disabled title="${tr('Previous comment')}" aria-label="${tr('Previous comment')}">${icon('up')}</button><button id="nextComment" class="icon-button" disabled title="${tr('Next comment')}" aria-label="${tr('Next comment')}">${icon('down')}</button></nav><button id="toggleCommentSearch" class="icon-button" title="${tr('Search comments')}" aria-label="${tr('Search comments')}">${icon('search')}</button><button id="filterCommentTags" class="icon-button" title="${tr('Filter comments by tag')}" aria-label="${tr('Filter comments by tag')}">${icon('filter')}</button><label class="resolved-filter" title="${tr('Show resolved')}"><input id="resolved" type="checkbox">${tr('Resolved')}</label><div id="commentSearchRow" hidden><input id="commentSearch" type="search" maxlength="1000" placeholder="${tr('Search comments')}" aria-label="${tr('Search comments')}"></div></div><div id="commentBody"><p id="commentEmpty" class="overview-empty" hidden>${tr('No matching comments.')}</p><div id="cards"></div><div id="commentOverview" hidden></div></div></aside>
       <div class="resizer" id="resizeComments" role="separator" aria-label="${tr('Comments column width')}" tabindex="0"></div><main id="source"></main>
       <div class="resizer" id="resizePdf" role="separator" aria-label="${tr('PDF column width')}" tabindex="0"></div><section id="pdf"><div id="syncStatus" role="status" aria-live="polite"></div><div id="pdfScroll"></div></section></div>
       <script nonce="${nonce}" src="${resource('editor.bundle.js')}"></script></body></html>`;
@@ -666,6 +716,8 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
 function tr(message: string): string { return vscode.l10n.t(message); }
 function icon(name: string): string {
   const paths: Record<string, string> = {
+    search: 'M11 6.5a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0 M10 10l4 4',
+    filter: 'M2 3h12L9 8v5l-2 1V8z',
     compare: 'M5 2H2v12h3 M11 2h3v12h-3 M6 5l-2 3 2 3 M10 5l2 3-2 3',
     file: 'M4 1.5h5l3 3v10H4z M9 1.5v3h3 M6 8h4 M6 10h4',
     commentPlus: 'M2 2.5h12v8H7l-3.5 3v-3H2z M8 4v5 M5.5 6.5h5',
