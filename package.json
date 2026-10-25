@@ -2,7 +2,7 @@
   "name": "tex-review",
   "displayName": "TeX Review Studio",
   "description": "Anchored review comments and bidirectional SyncTeX PDF navigation in a local TeX editor.",
-  "version": "0.6.15",
+  "version": "0.6.16",
   "publisher": "yumizsui",
   "license": "MIT",
   "author": "Kairi Furui",
@@ -146,7 +146,7 @@
     "watch": "node esbuild.js --watch",
     "compile": "tsc --noEmit",
     "test": "vitest run",
-    "package": "vsce package --allow-missing-repository --no-rewrite-relative-links"
+    "package": "vsce package"
   },
   "devDependencies": {
     "@codemirror/commands": "^6.11.1",
