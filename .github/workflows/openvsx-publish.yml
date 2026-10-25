@@ -1,0 +1,62 @@
+name: Publish to Open VSX
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Package version to publish (must match package.json)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openvsx-publish
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Check requested version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: node -e 'if (require("./package.json").version !== process.env.RELEASE_VERSION) throw new Error("Requested version does not match package.json")'
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm run compile
+      - run: mkdir -p releases
+      - run: npm run package -- --out releases/tex-review.vsix
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tex-review-release
+          path: releases/tex-review.vsix
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: openvsx
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          name: tex-review-release
+          path: releases
+      - name: Publish with a short-lived Open VSX credential
+        run: npm run publish:openvsx
