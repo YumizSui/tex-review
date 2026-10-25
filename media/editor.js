@@ -17,7 +17,7 @@ import * as pdfjs from 'pdfjs-dist';
 import { anchor } from '../src/core/anchor';
 import { commentHighlights } from '../src/core/commentHighlights';
 import { projectComments } from '../src/core/projectComments';
-import { alignCommentCard } from '../src/core/cardLayout';
+import { sourceLinkedCards } from '../src/core/cardLayout';
 
 const api = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
@@ -36,6 +36,7 @@ const liveAnchors = new Map();
 let syncRequest = 0, requestedBuildMode;
 let flushTimer, syncTimer, commentPending = false, composing = false, saveRequested = false, pendingCompose = false, buildRequested = null;
 const layoutMeasureKey = {};
+let followSource = false, commentOffset = 0, commentOrigin = 0, lastLinkedSourceTop = null, expectedRailScroll = null, layoutAnchor = null, commentLayoutDirty = true, cachedCommentLayout = null, resetCommentList = false, commentFilterSignature = '';
 let alignComment = false, alignmentGeneration = 0, restoringCommentFocus = false, pendingCommentScroll = null;
 const nativeTokens = StateEffect.define();
 const nativeDecorations = StateField.define({
@@ -116,39 +117,50 @@ function requestCommentAlignment() {
 function cancelCommentAlignment() { ++alignmentGeneration; alignComment = false; }
 function measureLayout() {
   if (!$('showComments').checked || overview) return null;
-  const area = $('commentBody').getBoundingClientRect();
-  const labels = [];
-  for (const [id, entry] of cards) {
-    const thread = review.threads.find(thread => thread.id === id);
-    if (thread) labels.push({ entry, text: threadLabel(thread) });
+  const area = $('commentBody').getBoundingClientRect(), rail = $('cards');
+  const signature = [area.width, area.height, editor.contentHeight, layoutAnchor];
+  if (commentLayoutDirty || !cachedCommentLayout || signature.some((value, i) => value !== cachedCommentLayout.signature[i])) {
+    const byId = new Map(review.threads.map(thread => [thread.id, thread]));
+    const items = [...rail.children].map(element => {
+      const id = element.dataset.thread || 'new', thread = byId.get(id);
+      const target = id === 'new' ? draftTarget : thread ? locate(thread) : null;
+      if (!target) return null;
+      const from = Math.max(0, Math.min(editor.state.doc.length, target.from));
+      const anchor = Math.max(10, editor.lineBlockAt(from).top + editor.documentTop + editor.scrollDOM.scrollTop - area.top);
+      return {id, element, anchor, height:element.getBoundingClientRect().height, label:thread ? threadLabel(thread) : null};
+    }).filter(Boolean);
+    const placement = sourceLinkedCards(items, layoutAnchor);
+    cachedCommentLayout = {signature, items, ...placement}; commentLayoutDirty = false;
   }
-  const selected = cards.get(selectedThread);
-  const thread = review.threads.find(thread => thread.id === selectedThread);
-  const target = selectedThread === 'new' ? draftTarget : thread ? locate(thread) : null;
-  const rect = alignComment && target ? editor.coordsAtPos(Math.max(0, Math.min(editor.state.doc.length, target.from))) : null;
-  const padding = parseFloat($('cards').style.paddingTop) || 10;
-  return { labels, height: area.height, tailHeight: $('cards').lastElementChild?.getBoundingClientRect().height || 0, selected,
-    placement: selected && rect ? alignCommentCard(selected.element.offsetTop - padding, rect.top - area.top, area.height) : null };
+  return {...cachedCommentLayout, height:area.height, sourceTop:editor.scrollDOM.scrollTop,
+    sourceMaximum:Math.max(0,editor.scrollDOM.scrollHeight-editor.scrollDOM.clientHeight)};
 }
 function applyLayout(result) {
-  // The comments pane owns its scroll range; it never extends the TeX document.
   if (editor.dom.style.getPropertyValue('--review-comment-overflow') !== '0px') editor.dom.style.setProperty('--review-comment-overflow', '0px');
   if (!result) return;
-  const rail = $('cards'); rail.style.paddingBottom = `${Math.max(10, result.height - result.tailHeight - 10)}px`;
-  for (const {entry, text} of result.labels) {
-    const label = entry.element.querySelector('.card-heading > button');
-    if (label && label.textContent !== text) label.textContent = text;
-  }
-  for (const [id, entry] of cards) {
-    entry.element.classList.toggle('is-active', id === selectedThread);
-    entry.element.setAttribute('aria-current', String(id === selectedThread));
-  }
-  if (alignComment && result.placement) {
-    alignComment = false;
-    rail.style.paddingTop = `${result.placement.paddingTop}px`;
-    rail.scrollTop = result.placement.scrollTop;
-  }
+  const rail = $('cards'), before = rail.scrollTop;
+  const last = result.items.at(-1);
+  const contentBottom = result.paddingTop + result.items.reduce((sum,item,i)=>sum+item.height+result.gaps[i],0);
+  const tail = Math.max(10,result.height-(last?.height || 0)-10,result.sourceMaximum-result.origin+result.height-contentBottom);
+  const setStyle = (element, name, value) => { const px = `${Math.round(value * 100) / 100}px`; if (element.style[name] !== px) element.style[name] = px; };
+  setStyle(rail,'paddingTop',result.paddingTop); setStyle(rail,'paddingBottom',tail);
+  result.items.forEach((item,i) => {
+    setStyle(item.element,'marginTop',result.gaps[i]);
+    const label = item.element.querySelector('.card-heading > button');
+    if (item.label && label && label.textContent !== item.label) label.textContent = item.label;
+    item.element.classList.toggle('is-active',item.id === selectedThread);
+    item.element.setAttribute('aria-current',String(item.id === selectedThread));
+  });
+  commentOrigin = result.origin;
+  const baseline = result.sourceTop - commentOrigin;
+  if (resetCommentList && result.items.length) { rail.scrollTop = result.items[0].element.offsetTop-10; commentOffset = rail.scrollTop-baseline; resetCommentList = false; }
+  else if (alignComment) { commentOffset = 0; rail.scrollTop = Math.max(0,baseline); }
+  else if (followSource || lastLinkedSourceTop !== null && Math.abs(result.sourceTop-lastLinkedSourceTop) > .5) rail.scrollTop = Math.max(0,baseline+commentOffset);
+  else { rail.scrollTop = before; commentOffset = rail.scrollTop-baseline; }
+  lastLinkedSourceTop = result.sourceTop; expectedRailScroll = rail.scrollTop;
+  alignComment = false; followSource = false;
 }
+
 function orderCommentCards() {
   const rail = $('cards');
   const ordered = [...cards].map(([id, entry]) => {
@@ -164,6 +176,10 @@ function orderCommentCards() {
 
 function refreshDecorations() {
   if (!editor) return;
+  for (const [id,entry] of cards) {
+    const active = id === selectedThread;
+    if (entry.element.classList.contains('is-active') !== active) { entry.element.classList.toggle('is-active',active); commentLayoutDirty = true; }
+  }
   const ranges = review.threads.filter(t => t.file === review.file && t.status === 'open' && commentMatches(t, commentQuery, tagFilter)).map(locate)
     .filter(t => !t.outdated && t.to > t.from)
     .map(t => ({ from: t.from, to: t.to, selected: t.id === selectedThread }));
@@ -235,16 +251,16 @@ function initialize(msg) {
     clearCards(); editor.destroy(); liveAnchors.clear();
   }
   const cached = sourceStates.get(msg.file);
-  cancelCommentAlignment();
+  cancelCommentAlignment(); followSource = false; lastLinkedSourceTop = null; expectedRailScroll = null; cachedCommentLayout = null; commentLayoutDirty = true; layoutAnchor = null;
   pendingCommentScroll = cached?.commentScrollTop ?? (previous.file === msg.file ? previous.commentScrollTop || 0 : 0);
   $('cards').style.paddingTop = `${cached?.commentPadding ?? (previous.file === msg.file ? previous.commentPadding || 10 : 10)}px`;
   clearTimeout(flushTimer); clearTimeout(syncTimer);
   pendingReview = null; pendingChanges = ChangeSet.empty(msg.text.length); inflight = null;
-  draftTarget = null; pendingComment = null; commentPending = false; selectedThread = msg.thread || cached?.selectedThread || null;
+  draftTarget = null; pendingComment = null; commentPending = false; selectedThread = msg.thread || cached?.selectedThread || null; layoutAnchor = selectedThread;
   pendingThread = msg.thread || null; navigationSent = false;
   conflictDraft = cached?.conflictDraft || (previous.file === msg.file ? previous.conflictDraft || '' : '');
   pendingChanges = ChangeSet.empty(msg.text.length);
-  version = msg.version; confirmed = msg.text; config = msg.config; review.file = msg.file; pendingCompose = !!msg.selection?.compose || !!msg.compose;
+  version = msg.version; confirmed = msg.text; config = msg.config; review.file = msg.file; if (msg.active !== undefined) review.active = msg.active; pendingCompose = !!msg.selection?.compose || !!msg.compose;
   pdfjs.GlobalWorkerOptions.workerSrc = msg.worker;
   editor = new EditorView({ parent: $('source'), state: EditorState.create({ doc: msg.text,
     selection: msg.selection && Number.isFinite(msg.selection.from) ? { anchor: Math.min(msg.text.length, msg.selection.from), head: Math.min(msg.text.length, msg.selection.to ?? msg.selection.from) } : undefined,
@@ -267,6 +283,7 @@ function initialize(msg) {
         }
         if (update.selectionSet) { forward(); }
         if (update.docChanged) updateComparisonCount();
+        if (update.geometryChanged || update.docChanged) commentLayoutDirty = true;
         if (update.viewportChanged || update.geometryChanged || update.docChanged) scheduleLayout();
       }),
       EditorView.domEventHandlers({ compositionstart() { composing = true; }, compositionend() { composing = false; setTimeout(flush, 0); } }),
@@ -290,7 +307,7 @@ function initialize(msg) {
     editor.dispatch({ selection: { anchor: target.from, head: target.to } });
     compose(); draftTarget = target; updateComposer();
   }
-  editor.scrollDOM.addEventListener('scroll', () => { scheduleLayout(); saveState(); }, { passive: true });
+  editor.scrollDOM.addEventListener('scroll', () => { followSource = true; scheduleLayout(); saveState(); }, { passive: true });
   applyAppearance();
   if (cached && !msg.selection && !msg.thread) editor.scrollDOM.scrollTop = cached.scrollTop;
   else if (!cached && previous.file === msg.file && previous.scrollTop && !msg.selection) editor.scrollDOM.scrollTop = previous.scrollTop;
@@ -337,7 +354,7 @@ function applyDocument(msg) {
 }
 function focusCard(id) {
   if (restoringCommentFocus || selectedThread === id) return;
-  selectedThread = id;
+  selectedThread = id; layoutAnchor = id;
   requestCommentAlignment();
   const thread = review.threads.find(thread => thread.id === id);
   if (thread) {
@@ -434,7 +451,7 @@ function updateTagFilter() {
   const active = tagFilter.length > 0;
   $('filterCommentTags').classList.toggle('is-filtered', active);
   $('filterCommentTags').setAttribute('aria-pressed', String(active));
-  $('filterCommentTags').title = active ? tagFilter.map(tag => t(commentTagLabels[tag])).join(' · ') : t('Filter comments by tag');
+  $('filterCommentTags').title = active ? tagFilter.map(tag => t(commentTagLabels[tag])).join(' · ') : t('Filter comments by type');
 }
 $('toggleCommentSearch').addEventListener('click', () => {
   const row = $('commentSearchRow'); row.hidden = !row.hidden;
@@ -464,6 +481,9 @@ $('nextComment').addEventListener('click', () => navigateComment(1));
 function clearCards() { for (const c of cards.values()) c.element.remove(); cards.clear(); }
 function renderComments() {
   if (!editor) return;
+  commentLayoutDirty = true;
+  const filterSignature = JSON.stringify([commentQuery,tagFilter]);
+  if (filterSignature !== commentFilterSignature) { resetCommentList = !!commentQuery || tagFilter.length > 0; commentFilterSignature = filterSignature; }
   const currentIds = new Set(), restoreScroll = [], railScroll = $('cards').scrollTop;
   const focusedInput = document.activeElement instanceof HTMLTextAreaElement && $('cards').contains(document.activeElement) ? document.activeElement : null;
   const focusedSelection = focusedInput ? [focusedInput.selectionStart, focusedInput.selectionEnd] : null;
@@ -485,7 +505,7 @@ function renderComments() {
     const head = make('div', undefined, 'card-heading');
     head.append(button(threadLabel(thread, loc), () => {
       const current = locate(review.threads.find(item => item.id === thread.id) || thread);
-      selectedThread = thread.id; requestCommentAlignment(); editor.dispatch({ selection: { anchor: current.from, head: current.to }, effects: EditorView.scrollIntoView(current.from, { y: 'center' }) });
+      selectedThread = thread.id; layoutAnchor = thread.id; requestCommentAlignment(); editor.dispatch({ selection: { anchor: current.from, head: current.to }, effects: EditorView.scrollIntoView(current.from, { y: 'center' }) });
       refreshDecorations(); editor.focus(); forward();
     }), button(thread.status === 'resolved' ? t('Reopen') : t('Resolve'), () => send(thread.status === 'resolved' ? 'reopen' : 'resolve', { thread: thread.id, review: review.active })),
       button('…', () => send('threadActions', { thread: thread.id, review: review.active })));
@@ -548,6 +568,12 @@ function renderComments() {
     else if (focus) restoreInput = { input, selection };
   }
   for (const [id, c] of cards) if (id !== 'new' && !currentIds.has(id)) { c.element.remove(); cards.delete(id); }
+  if (layoutAnchor && !cards.has(layoutAnchor)) {
+    const oldItems = cachedCommentLayout?.items || [], at = oldItems.findIndex(item=>item.id===layoutAnchor);
+    layoutAnchor = oldItems.slice(at+1).find(item=>cards.has(item.id))?.id || [...cards.keys()][0] || null;
+    if (!cards.has(selectedThread)) selectedThread = null;
+    followSource = true;
+  }
   orderCommentCards();
   const restored = restoreInput || (focusedInput?.isConnected ? {input:focusedInput,selection:focusedSelection} : null);
   if (restored) { restoringCommentFocus = true; restored.input.focus({preventScroll:true}); restored.input.setSelectionRange(...restored.selection); restoringCommentFocus = false; }
@@ -574,20 +600,25 @@ function updateComposer() {
   const card = cards.get('new')?.element; if (!card || !draftTarget) return;
   card.querySelector('strong').textContent = t('Comment on line {0}', editor.state.doc.lineAt(draftTarget.from).number);
   card.querySelector('.quote').textContent = draftTarget.snapshot.slice(0, 180);
+  const types = card.querySelector('.composer-type');
+  if (types) types.textContent = commentTags(draftTarget.tags).map(tag=>t(commentTagLabels[tag])).join(' · ');
 }
 function compose() {
   if (!editor) return;
   $('showComments').checked = true; setColumns(); $('commentEmpty').hidden = true;
   if (cards.has('new')) { cards.get('new').element.querySelector('textarea').focus(); return; }
-  draftTarget = { ...snapshotSelection(), status: 'attached' };
-  const card = make('article', undefined, 'card composer');
+  draftTarget = { ...snapshotSelection(), status: 'attached', tags: ['action'] };
+  const card = make('article', undefined, 'card composer'); card.dataset.thread = 'new'; commentLayoutDirty = true;
   card.append(make('strong', t('Comment on line {0}', draftTarget.range.startLine)));
   const quote = make('p', draftTarget.snapshot.slice(0, 180), 'quote'); card.append(quote);
+  const composer = crypto.randomUUID(); card.dataset.composer = composer;
+  const type = button(t('Action required'),()=>send('chooseComposerType',{composer,tags:commentTags(draftTarget.tags)}));
+  type.className = 'composer-type'; type.title = t('Comment type'); type.setAttribute('aria-label',t('Comment type')); card.append(type);
   const input = make('textarea'); input.rows = 3; input.placeholder = t('Write a comment…'); input.setAttribute('aria-label', t('Write a comment…')); input.value = drafts[key('new')] || '';
   input.addEventListener('input', () => { drafts[key('new')] = input.value; saveState(); });
   const submit = () => {
     if (!input.value.trim() || commentPending) return;
-    commentPending = true; pendingComment = { review: review.active, body: input.value, snapshot: draftTarget.snapshot };
+    commentPending = true; pendingComment = { review: review.active, body: input.value, snapshot: draftTarget.snapshot, tags: commentTags(draftTarget.tags) };
     flush(); finishComment();
   };
   input.addEventListener('keydown', e => {
@@ -596,10 +627,10 @@ function compose() {
     else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submit(); }
   });
   card.append(input, button(t('Add'), submit), button(t('Cancel'), cancelCompose), button(t('Update selection'), () => {
-    draftTarget = { ...snapshotSelection(), status: 'attached' }; updateComposer(); refreshDecorations(); input.focus();
+    draftTarget = { ...snapshotSelection(), status: 'attached', tags: draftTarget.tags }; updateComposer(); refreshDecorations(); input.focus();
   }));
   $('cards').append(card); cards.set('new', { element: card }); selectedThread = 'new';
-  orderCommentCards(); requestCommentAlignment(); refreshDecorations(); scheduleLayout(); input.focus();
+  layoutAnchor = 'new'; orderCommentCards(); requestCommentAlignment(); refreshDecorations(); scheduleLayout(); input.focus();
 }
 
 let pdfLoadGeneration = 0;
@@ -683,10 +714,14 @@ const scrollComments = commentScrollHandler(
   },
 );
 $('comments').addEventListener('wheel', event => {
-  cancelCommentAlignment();
+  cancelCommentAlignment(); followSource = false;
   if (!overview) scrollComments(event);
 }, {passive:false});
-$('cards').addEventListener('scroll', saveState, {passive:true});
+$('commentBody').addEventListener('pointerdown', event => {
+  if (event.target.closest('.card,button,input,textarea,label,summary')) return;
+  selectedThread = null; cancelCommentAlignment(); refreshDecorations(); scheduleLayout(); saveState();
+});
+$('cards').addEventListener('scroll', () => { if (expectedRailScroll === null || Math.abs($('cards').scrollTop-expectedRailScroll) > 1) commentOffset = $('cards').scrollTop - (editor.scrollDOM.scrollTop-commentOrigin); saveState(); }, {passive:true});
 $('source').addEventListener('wheel', cancelCommentAlignment, {passive:true});
 $('roots').addEventListener('change', () => requestNavigation({ file: $('roots').value, root: $('roots').value, explicit: true }));
 $('selectPdf').addEventListener('click', () => send('selectPdf'));
@@ -771,6 +806,10 @@ window.addEventListener('message', event => timings.measure(`message.${event.dat
     editor.dispatch({ selection: { anchor: Math.min(length, m.from), head: Math.min(length, m.to) }, effects: EditorView.scrollIntoView(Math.min(length, m.from), { y: 'center' }) });
     if (m.compose) compose(); else editor.focus();
   }
+  else if (m.type === 'composerType') {
+    const card=cards.get('new')?.element;
+    if (draftTarget && card?.dataset.composer === m.composer) { draftTarget.tags = m.tags; updateComposer(); saveState(); card.querySelector('textarea').focus({preventScroll:true}); }
+  }
   else if (m.type === 'tagFilter') { tagFilter = m.tags; updateTagFilter(); renderComments(); saveState(); }
   else if (m.type === 'linkCopied') $('status').textContent = t('Comment link copied');
   else if (m.type === 'transaction') { editor.dispatch({effects:transactionConfig.reconfigure(EditorState.readOnly.of(!!m.busy))}); $('status').textContent = m.busy ? t('AI edit pending') : t('Changes applied'); }
@@ -789,7 +828,7 @@ window.addEventListener('message', event => timings.measure(`message.${event.dat
     const entry = cards.get(m.key), pending = entry?.pendingReply;
     if (m.key === 'new' || (pending && drafts[key(m.key)] === pending.body)) drafts[key(m.key)] = '';
     commentPending = false;
-    if (m.key === 'new') { cards.get('new')?.element.remove(); cards.delete('new'); draftTarget = null; }
+    if (m.key === 'new') { cards.get('new')?.element.remove(); cards.delete('new'); draftTarget = null; if (m.thread && !pendingNavigation) pendingThread = m.thread; }
     else if (entry) {
       // Keep the existing card until the updated review arrives, preserving its viewport.
       entry.signature = null; entry.replySaved = pending && { ...pending, focus: pending.focus && entry.element.contains(document.activeElement) }; entry.pendingReply = null;

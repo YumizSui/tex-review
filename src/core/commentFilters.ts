@@ -7,6 +7,12 @@ export function commentTags(value?: readonly string[]): CommentTag[] {
   const tags = commentTagIds.filter(tag => chosen.includes(tag));
   return tags.length ? tags : ['action'];
 }
+/** New writes use one type; commentTags still reads historical multi-tag threads. */
+export function commentTypeTags(value: unknown = ['action']): CommentTag[] {
+  if (!Array.isArray(value) || value.length > 1 || value.some(tag => !commentTagIds.includes(tag)))
+    throw new Error('Choose one comment type: action, question, todo, or note.');
+  return commentTags(value);
+}
 const normalized = (text: string) => text.normalize('NFKC').toLowerCase();
 export function commentMatches(thread: Thread, query = '', tags: readonly string[] = []): boolean {
   if (tags.length && !commentTags(thread.tags).some(tag => tags.includes(tag))) return false;

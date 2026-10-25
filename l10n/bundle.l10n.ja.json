@@ -137,5 +137,8 @@
   "No matching comments.": "一致するコメントはありません。",
   "Comment link copied": "コメントへのリンクをコピーしました",
   "Open the comment link in its original workspace.": "リンク元のワークスペースを開いてください。",
-  "Review not found.": "レビューが見つかりません。"
+  "Review not found.": "レビューが見つかりません。",
+  "Comment type": "コメントの種類",
+  "Filter comments by type": "種類で絞り込む",
+  "Change type…": "種類を変更…"
 }

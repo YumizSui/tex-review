@@ -4,7 +4,7 @@ TeX Review provides a local API for AI coding assistants. A transaction changes
 one TeX source and assigns its affected comments to explicit destinations in the
 resulting text. Original comments, replies, and quoted snapshots are preserved.
 Source transactions never resolve or delete a thread. Explicit comment operations
-can reply, change tags, resolve, or reopen an existing thread.
+can reply, change type, resolve, or reopen an existing thread.
 
 The extension must be running in a trusted workspace. Run the client from that
 workspace's root. `.review/api.json` contains the installed client's `cli` path;
@@ -86,13 +86,15 @@ Each request performs one explicit action:
 | `action` | Additional fields | Result |
 | --- | --- | --- |
 | `reply` | `body` | Append a reply as `agent`. |
-| `set_tags` | `tags`, e.g. `["action", "question"]` | Replace the thread's tags. |
+| `set_tags` | `tags`, e.g. `["question"]` | Set the thread's comment type. |
 | `resolve` | None | Mark the thread resolved. |
 | `reopen` | None | Mark the thread open. |
 
-The supported tags are `action`, `question`, `todo`, and `note`. An empty tags
-array resets the thread to `action`. Unknown tags, unknown fields, deleted
-threads, and stale revisions are rejected. Tags and resolved status are
+The four comment types are `action`, `question`, `todo`, and `note`. The `tags`
+field retains its name for compatibility and accepts at most one type. An empty
+array resets the thread to `action`. Historical multi-tag threads remain readable
+until explicitly reclassified. Unknown types, multiple new types, unknown fields, deleted
+threads, and stale revisions are rejected. Comment type and resolved status are
 independent. Replying never resolves a thread. Resolution still requires the
 user's or project's authorization.
 

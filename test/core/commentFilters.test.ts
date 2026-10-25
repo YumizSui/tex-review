@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest';
-import {commentTags,commentMatches,commentPreview} from '../../src/core/commentFilters';
+import {commentTags,commentMatches,commentPreview,commentTypeTags} from '../../src/core/commentFilters';
 import {fold} from '../../src/core/events';
 const event={op:'add_thread' as const,id:'t1',file:'a.tex',range:{startLine:2,endLine:2},snapshot:'original passage',body:'Check antibody affinity.',author:'reviewer',ts:'2026-10-25T00:00:00Z'};
 describe('comment tags and search',()=>{
@@ -23,4 +23,10 @@ describe('comment tags and search',()=>{
  it('does not match a deleted reply',()=>{
   const thread=fold('review',[event,{op:'reply',thread:'t1',body:'Removed keyword',author:'agent',ts:event.ts},{op:'delete_comment',comment:'t1.c2',ts:event.ts}]).threads[0];expect(commentMatches(thread,'Removed')).toBe(false);
  });
+});
+
+it('accepts one type for new writes and retains multiple tags only when reading historical events',()=>{
+ expect(commentTypeTags(['todo'])).toEqual(['todo']);expect(commentTypeTags([])).toEqual(['action']);
+ expect(()=>commentTypeTags(['question','todo'])).toThrow('Choose one');expect(()=>commentTypeTags(['invalid'])).toThrow('Choose one');
+ expect(commentTags(['question','todo'])).toEqual(['question','todo']);
 });

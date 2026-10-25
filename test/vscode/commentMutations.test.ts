@@ -39,8 +39,8 @@ describe('comment API mutations',()=>{
   const f=await fixture();
   for(const [i,action] of (['set_tags','resolve','reopen'] as const).entries()){
    const state=await f.sources.read(f.file);
-   await f.api.mutate({id:'request_'+i,file:f.file,review:'review',thread:'t_one',reviewRevision:state.reviewRevision,action,...(action==='set_tags'?{tags:['question','todo'] as const}: {})} as CommentMutation);
-   const thread=f.service.view('review').threads[0];expect(thread.status).toBe(action==='resolve'?'resolved':'open');expect(thread.tags).toEqual(['question','todo']);expect(thread.comments).toEqual(f.original.comments);expect(thread.anchor).toEqual(f.original.anchor);
+   await f.api.mutate({id:'request_'+i,file:f.file,review:'review',thread:'t_one',reviewRevision:state.reviewRevision,action,...(action==='set_tags'?{tags:['question'] as const}: {})} as CommentMutation);
+   const thread=f.service.view('review').threads[0];expect(thread.status).toBe(action==='resolve'?'resolved':'open');expect(thread.tags).toEqual(['question']);expect(thread.comments).toEqual(f.original.comments);expect(thread.anchor).toEqual(f.original.anchor);
   }
  });
  it('rejects malformed actions, unknown tags, wrong file, deleted thread, and author spoofing without appending',async()=>{
@@ -56,7 +56,7 @@ describe('comment API mutations',()=>{
   const f=await fixture();vi.spyOn(f.access,'read').mockResolvedValue({text:f.text,dirty:true,version:2});
   const current=await f.sources.read(f.file);
   const {body,...base}=f.request;
-  await expect(f.api.mutate({...base,reviewRevision:current.reviewRevision,action:'set_tags',tags:['invalid'] as any})).rejects.toThrow('Unknown comment tag');
+  await expect(f.api.mutate({...base,reviewRevision:current.reviewRevision,action:'set_tags',tags:['invalid'] as any})).rejects.toThrow('Choose one comment type');
   await f.api.mutate({...base,reviewRevision:current.reviewRevision,action:'set_tags',tags:[]});
   expect(f.service.view('review').threads[0].tags).toEqual(['action']);expect(f.access.save).not.toHaveBeenCalled();expect(f.access.apply).not.toHaveBeenCalled();
  });

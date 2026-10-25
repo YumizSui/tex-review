@@ -12,11 +12,12 @@ and do not bypass API validation with direct log appends.
 
 ## Comment intent
 
-Read `tags` before acting. Missing or empty tags mean `action` (Action required).
-For `question` alone, answer first; do not assume it requests a source edit.
-`question` with `action` requests both an answer and a correction. `todo` marks
-deferred work; process it when it is within the user's requested scope. `note`
-alone is informational. Tags can be combined and do not change resolved status.
+Read `tags` before acting. New comments have one type: `action` (Action required,
+the default), `question`, `todo`, or `note`. For `question`, answer first; do not
+assume it requests a source edit. `todo` marks deferred work; process it within
+the requested scope. `note` is informational. Historical multi-tag comments
+remain readable; do not silently discard one of their tags. Type and resolved
+status are independent.
 Follow workspace instructions for replies and resolution; completing an edit
 does not itself authorize resolving or deleting the thread.
 
@@ -60,7 +61,7 @@ Do not silently fall back to direct log writes. If a view may be stale, reopen
 the extension and read through the API; folding the log does not produce current
 checkpoint positions. Report the unavailable capability when it blocks work.
 
-## Replies, status, and tags
+## Replies, status, and type
 
 Check `capabilities` in `.review/api.json` for `comment`. Use the CLI's `comment`
 operation with a JSON file or stdin; see the [API reference](../../docs/AI_EDITING.md).
@@ -82,8 +83,8 @@ node /path/from/api.json/tex-review.mjs comment comment-request.json
 ```
 
 - `reply` requires `body`; the server assigns `author: "agent"` and timestamp.
-- `set_tags` requires `tags`, a list from `action`, `question`, `todo`, `note`.
-  It replaces the tag set; `[]` resets it to `action`. Change tags only when
+- `set_tags` requires `tags`, an array containing one of `action`, `question`, `todo`, `note`.
+  It sets the comment type; `[]` resets it to `action`. Change type only when
   requested or authorized by project instructions.
 - `resolve` and `reopen` have no extra fields. Resolve only when explicitly
   authorized; completing an edit or posting a reply is not authorization.

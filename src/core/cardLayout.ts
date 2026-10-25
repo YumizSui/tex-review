@@ -71,3 +71,12 @@ export function alignCommentCard(cardTop: number, sourceY: number, viewportHeigh
   const paddingTop = Math.max(10, target - cardTop);
   return { paddingTop, scrollTop: Math.max(0, cardTop + paddingTop - target) };
 }
+
+/** Source-coordinate packing is independent of the viewport: scrolling translates
+ * the whole rail, without changing pivots or repacking dense groups. */
+export function sourceLinkedCards(cards: CardMeasure[], focusedId: string | null, gap = 10) {
+  const tops = layoutCards(cards, focusedId, gap);
+  const origin = Math.min(0, (tops[0] ?? gap) - gap);
+  return { origin, paddingTop: (tops[0] ?? gap) - origin,
+    gaps: tops.map((top, i) => i ? top - tops[i - 1] - cards[i - 1].height : 0) };
+}

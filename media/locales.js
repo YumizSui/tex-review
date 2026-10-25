@@ -1,4 +1,7 @@
 const ja = {
+  "Comment type": "コメントの種類",
+  "Filter comments by type": "種類で絞り込む",
+  "Change type…": "種類を変更…",
   "Action required": "要対応",
   "Question": "質問",
   "TODO": "TODO",

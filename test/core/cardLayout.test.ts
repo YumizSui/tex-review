@@ -1,3 +1,4 @@
+import { sourceLinkedCards } from '../../src/core/cardLayout';
 import { alignCommentCard } from '../../src/core/cardLayout';
 import { describe,it,expect } from 'vitest';
 import { commentRailPosition, commentViewportAnchor, commentBottomPadding, layoutCards, layoutViewportCards } from '../../src/core/cardLayout';
@@ -120,5 +121,19 @@ describe('explicit comment alignment', () => {
     expect(alignCommentCard(0,-50,600)).toEqual({paddingTop:10,scrollTop:0});
     const result=alignCommentCard(1000,800,600);
     expect(1000+result.paddingTop-result.scrollTop).toBe(570);
+  });
+});
+
+describe('source-linked comment rail', () => {
+  it('preserves empty source space between distant threads', () => {
+    const result=sourceLinkedCards([{id:'a',anchor:20,height:80},{id:'b',anchor:1000,height:100}],null);
+    expect(result).toEqual({origin:0,paddingTop:20,gaps:[0,900]});
+  });
+  it('keeps preceding dense threads reachable without a viewport-dependent pivot', () => {
+    const result=sourceLinkedCards([{id:'a',anchor:10,height:100},{id:'b',anchor:10,height:100},{id:'c',anchor:10,height:100}],'c');
+    expect(result).toEqual({origin:-220,paddingTop:10,gaps:[0,10,10]});
+    // At source scrollTop=0 the focused card is at y=10; rail scrollTop=0
+    // still exposes the first card when the reader scrolls the comments upward.
+    expect(result.paddingTop+100+10+100+10+result.origin).toBe(10);
   });
 });

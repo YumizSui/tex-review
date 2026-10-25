@@ -242,7 +242,12 @@ body.vscode-high-contrast, body.vscode-high-contrast-light { --tex-command: var(
 .thread-tags { color: var(--vscode-descriptionForeground); font-size: 10px; margin-top: 5px; }
 #commentEmpty { position: absolute; inset: 0; margin: 0; pointer-events: none; }
 
-/* Manual reading uses a normal scrollable list. Align only on explicit selection. */
+/* Source-coordinate gaps remain fixed while the source scrolls. Threads retain their own scroll. */
 #commentBody { overflow: clip; }
-#cards { display: flex; flex-direction: column; gap: 10px; padding: 10px; overflow: auto; overscroll-behavior: contain; overflow-anchor: none; pointer-events: auto; }
+#cards { display: flex; flex-direction: column; gap: 0; padding: 10px; overflow: auto; overscroll-behavior: contain; overflow-anchor: none; pointer-events: auto; }
 #cards .card { position: relative; top: auto; left: auto; right: auto; flex: none; }
+
+.card > .composer-type:first-of-type { display:block; margin:5px 0; padding:3px 6px; background:var(--vscode-button-secondaryBackground); color:var(--vscode-button-secondaryForeground); font-size:11px; }
+
+.card > .composer-type:first-of-type { border:1px solid var(--vscode-dropdown-border,var(--vscode-panel-border)); }
+.composer-type::after { content:'⌄'; margin-left:8px; }

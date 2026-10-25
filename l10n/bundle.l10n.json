@@ -137,5 +137,8 @@
   "No matching comments.": "No matching comments.",
   "Comment link copied": "Comment link copied",
   "Open the comment link in its original workspace.": "Open the comment link in its original workspace.",
-  "Review not found.": "Review not found."
+  "Review not found.": "Review not found.",
+  "Comment type": "Comment type",
+  "Filter comments by type": "Filter comments by type",
+  "Change type…": "Change type…"
 }

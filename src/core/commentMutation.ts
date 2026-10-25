@@ -1,4 +1,4 @@
-import { commentTagIds, commentTags, CommentTag } from './commentFilters';
+import { commentTypeTags, CommentTag } from './commentFilters';
 import { ReviewEvent, Thread } from './types';
 export interface CommentMutation {
   id: string;
@@ -20,13 +20,13 @@ export function validateCommentMutation(request: CommentMutation) {
   const fields = ['id','file','review','thread','reviewRevision','action','dryRun', ...(request.action === 'reply' ? ['body'] : request.action === 'set_tags' ? ['tags'] : [])];
   if (Object.keys(request).some(key => !fields.includes(key))) throw new Error('Unexpected comment request field.');
   if (request.action === 'reply' && (typeof request.body !== 'string' || !request.body.trim() || request.body.length > 100000)) throw new Error('Provide a nonempty reply body (at most 100000 characters).');
-  if (request.action === 'set_tags' && (!Array.isArray(request.tags) || request.tags.length > commentTagIds.length || request.tags.some(tag => !commentTagIds.includes(tag)))) throw new Error('Unknown comment tag. Use action, question, todo, or note.');
+  if (request.action === 'set_tags') { if (request.tags === undefined) throw new Error('Provide a tags array containing one comment type.'); commentTypeTags(request.tags); }
 }
 export function commentMutationEvent(request: CommentMutation, thread: Thread, ts: string): ReviewEvent {
   if (thread.id !== request.thread || thread.file !== request.file) throw new Error('Comment does not belong to the requested source.');
   switch (request.action) {
     case 'reply': return {op:'reply',thread:thread.id,author:'agent',body:request.body!,ts};
-    case 'set_tags': return {op:'set_tags',thread:thread.id,tags:commentTags(request.tags),ts};
+    case 'set_tags': return {op:'set_tags',thread:thread.id,tags:commentTypeTags(request.tags),ts};
     case 'resolve': case 'reopen': return {op:request.action,thread:thread.id,ts};
   }
 }
