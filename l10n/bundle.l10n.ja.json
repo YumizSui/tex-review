@@ -119,5 +119,8 @@
   "Show performance log": "パフォーマンスログを表示",
   "Comment navigation": "コメント間の移動",
   "Previous comment": "前のコメント",
-  "Next comment": "次のコメント"
+  "Next comment": "次のコメント",
+  "File": "ファイル",
+  "Manuscript": "原稿全体",
+  "Source file": "本文ファイル"
 }

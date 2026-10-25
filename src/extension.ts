@@ -19,6 +19,7 @@ function initialize(context: vscode.ExtensionContext): void {
   const editor = new ReviewEditor(context, folder, service);
   context.subscriptions.push(vscode.window.registerCustomEditorProvider(ReviewEditor.viewType, editor,
     { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false }));
+  context.subscriptions.push(vscode.window.registerWebviewPanelSerializer('texReview.session', { deserializeWebviewPanel: (panel, state) => editor.restore(panel, state) }));
   const register = (id: string, fn: () => unknown) => context.subscriptions.push(
     vscode.commands.registerCommand(id, async () => {
       try { await fn(); } catch (err) { vscode.window.showErrorMessage(`TeX Review: ${String(err)}`); }

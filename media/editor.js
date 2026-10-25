@@ -15,7 +15,7 @@ import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/sea
 import * as pdfjs from 'pdfjs-dist';
 import { anchor } from '../src/core/anchor';
 import { commentHighlights } from '../src/core/commentHighlights';
-import { adjacentComment } from '../src/core/commentNavigation';
+import { projectComments } from '../src/core/projectComments';
 import { commentBottomPadding, layoutViewportCards } from '../src/core/cardLayout';
 
 const api = acquireVsCodeApi();
@@ -24,7 +24,10 @@ const previous = api.getState() || {};
 let editor, version = 0, confirmed = '', inflight = null, restoring = false, conflictDraft = previous.conflictDraft || '';
 let review = { active: null, reviews: [], threads: [], file: '' }, config = {}, draftTarget = null;
 let drafts = previous.drafts || {}, cards = new Map(), selectedThread = null, activeRange = null;
-let openNativeRequested = false;
+let openNativeRequested = false, pendingNavigation = null, navigationSent = false, pendingThread = null;
+const sourceStates = new Map();
+let overview = previous.overview || false;
+const savedComposers = previous.composers || {};
 let pendingChanges = ChangeSet.empty(0), pendingReview = null, pendingComment = null;
 const liveAnchors = new Map();
 let syncRequest = 0, requestedBuildMode;
@@ -43,12 +46,15 @@ const nativeDecorations = StateField.define({
 const appearanceConfig = new Compartment();
 const comparisonConfig = new Compartment();
 const markerConfig = new Compartment(), highlights = StateEffect.define();
-const key = id => `${review.active || '(new)'}:${id}`;
-const send = (type, extra = {}) => api.postMessage({ type, ...extra });
+const key = id => `${review.active || '(new)'}:${id === 'new' ? review.file + ':' : ''}${id}`;
+const send = (type, extra = {}) => api.postMessage({ type, file: review.file, ...extra });
 const timings = performanceMonitor(entry => send('performance', entry));
 timings.observe();
-const saveState = () => api.setState({ drafts, conflictDraft, scrollTop: editor?.scrollDOM.scrollTop,
-  showPdf: $('showPdf').checked, showComments: $('showComments').checked });
+const saveState = () => {
+  if (review.file) { if (draftTarget) savedComposers[review.file] = draftTarget; else delete savedComposers[review.file]; }
+  api.setState({ drafts, composers: savedComposers, conflictDraft, file: review.file, overview, scrollTop: editor?.scrollDOM.scrollTop,
+    showPdf: $('showPdf').checked, showComments: $('showComments').checked });
+};
 const make = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; };
 const button = (text, fn) => {
   const b = make('button', text);
@@ -153,7 +159,7 @@ function flush() {
   if (text === confirmed) {
     pendingChanges = ChangeSet.empty(text.length);
     if (review.version === version) { for (const thread of review.threads) if (thread.file === review.file && thread.anchor) liveAnchors.set(thread.id, thread.anchor); refreshDecorations(); }
-    finishComment(); return;
+    finishComment(); finishNavigation(); return;
   }
   inflight = text;
   send('edit', { version, changes: pendingChanges.toJSON() });
@@ -199,12 +205,22 @@ function markerExtension(side) {
   });
 }
 function initialize(msg) {
-  if (editor) return;
+  if (editor) {
+    sourceStates.set(review.file, { state: editor.state, scrollTop: editor.scrollDOM.scrollTop, draftTarget,
+      conflictDraft, selectedThread });
+    clearCards(); editor.destroy(); liveAnchors.clear();
+  }
+  const cached = sourceStates.get(msg.file);
+  clearTimeout(flushTimer); clearTimeout(syncTimer);
+  pendingReview = null; pendingChanges = ChangeSet.empty(msg.text.length); inflight = null;
+  draftTarget = null; pendingComment = null; commentPending = false; selectedThread = msg.thread || cached?.selectedThread || null;
+  pendingThread = msg.thread || null; navigationSent = false;
+  conflictDraft = cached?.conflictDraft || (previous.file === msg.file ? previous.conflictDraft || '' : '');
   pendingChanges = ChangeSet.empty(msg.text.length);
-  version = msg.version; confirmed = msg.text; config = msg.config; review.file = msg.file; pendingCompose = !!msg.compose;
+  version = msg.version; confirmed = msg.text; config = msg.config; review.file = msg.file; pendingCompose = !!msg.selection?.compose || !!msg.compose;
   pdfjs.GlobalWorkerOptions.workerSrc = msg.worker;
   editor = new EditorView({ parent: $('source'), state: EditorState.create({ doc: msg.text,
-    selection: msg.selection ? { anchor: msg.selection.from, head: msg.selection.to } : undefined,
+    selection: msg.selection && Number.isFinite(msg.selection.from) ? { anchor: Math.min(msg.text.length, msg.selection.from), head: Math.min(msg.text.length, msg.selection.to ?? msg.selection.from) } : undefined,
     extensions: [lineNumbers(), highlightActiveLine(), history(), highlightSelectionMatches(), search({ top: true, createPanel: createSearchPanel,
         scrollToMatch: range => EditorView.scrollIntoView(range, { y: 'center' }) }),
       texParser, EditorView.lineWrapping,
@@ -228,10 +244,29 @@ function initialize(msg) {
       }),
       EditorView.domEventHandlers({ compositionstart() { composing = true; }, compositionend() { composing = false; setTimeout(flush, 0); } }),
     ] }) });
-  editor.scrollDOM.addEventListener('scroll', scheduleLayout, { passive: true });
+  if (cached) {
+    let state = cached.state;
+    if (state.doc.toString() !== msg.text) state = state.update({ changes: sourceChanges(state.doc, sourceText(msg.text)), annotations: Transaction.addToHistory.of(false) }).state;
+    editor.setState(state);
+    editor.dispatch({ effects: [nativeTokens.of(Decoration.none), comparisonConfig.reconfigure([])] });
+  }
+  if (msg.selection) {
+    const line = Number.isFinite(msg.selection.line) ? editor.state.doc.line(Math.max(1, Math.min(editor.state.doc.lines, msg.selection.line))) : null;
+    const from = line ? Math.min(line.to, line.from + Math.max(0, (msg.selection.column || 1) - 1)) : Math.min(msg.text.length, msg.selection.from || 0);
+    const to = line ? from : Math.min(msg.text.length, msg.selection.to ?? from);
+    editor.dispatch({ selection: { anchor: from, head: to }, effects: EditorView.scrollIntoView(from, { y: 'center' }) });
+  }
+  const savedTarget = cached?.draftTarget || savedComposers[msg.file];
+  if (savedTarget) {
+    const target = cached ? followDraftTarget(cached.state.doc, editor.state.doc, savedTarget)
+      : { ...savedTarget, from: Math.min(msg.text.length, savedTarget.from), to: Math.min(msg.text.length, savedTarget.to), status: msg.text.slice(savedTarget.from, savedTarget.to) === savedTarget.snapshot ? 'attached' : 'uncertain' };
+    editor.dispatch({ selection: { anchor: target.from, head: target.to } });
+    compose(); draftTarget = target; updateComposer();
+  }
+  editor.scrollDOM.addEventListener('scroll', () => { scheduleLayout(); saveState(); }, { passive: true });
   applyAppearance();
-  if (previous.scrollTop) editor.scrollDOM.scrollTop = previous.scrollTop;
-  new ResizeObserver(() => { scheduleLayout(); schedulePdf(); }).observe($('workspace'));
+  if (cached && !msg.selection && !msg.thread) editor.scrollDOM.scrollTop = cached.scrollTop;
+  else if (!cached && previous.file === msg.file && previous.scrollTop && !msg.selection) editor.scrollDOM.scrollTop = previous.scrollTop;
   if (conflictDraft && conflictDraft !== msg.text) send('compareUnsaved', { text: conflictDraft });
   else if (conflictDraft) { conflictDraft = ''; saveState(); }
   editor.focus(); forward();
@@ -259,11 +294,11 @@ function applyDocument(msg) {
   if (action === 'ignore') return;
   if (action === 'ack') {
     confirmed = msg.text; version = msg.version; inflight = null;
-    if (local !== confirmed) flush(); else { $('status').textContent = t('Changes applied'); acceptPendingReview(); finishComment(); finishSave(); }
+    if (local !== confirmed) flush(); else { $('status').textContent = t('Changes applied'); acceptPendingReview(); finishComment(); finishSave(); finishNavigation(); }
     return;
   }
   if (action === 'conflict') {
-    conflictDraft = local; pendingComment = null; commentPending = false; saveRequested = false; buildRequested = null; openNativeRequested = false; saveState();
+    conflictDraft = local; pendingNavigation = null; navigationSent = false; pendingComment = null; commentPending = false; saveRequested = false; buildRequested = null; openNativeRequested = false; saveState();
     send('compareUnsaved', { text: local });
   }
   restoring = true;
@@ -288,16 +323,64 @@ function focusCard(id) {
 function visibleThreads() {
   return review.threads.filter(thread => thread.file === review.file && ($('resolved').checked || thread.status === 'open'));
 }
+function manuscriptThreads() { return projectComments(review.threads, review.files || [review.file], $('resolved').checked); }
+function jumpThread(thread) {
+  if (thread.file !== review.file) {
+    requestNavigation({ file: thread.file, thread: thread.id }); return;
+  }
+  selectedThread = null; focusCard(thread.id);
+  const loc = locate(thread);
+  editor.dispatch({ selection: { anchor: loc.from, head: loc.to }, effects: EditorView.scrollIntoView(loc.from, { y: 'center' }) });
+  renderOverview(); refreshDecorations(); editor.focus(); forward(true);
+}
 function navigateComment(direction) {
   if (!editor) return;
-  const id = adjacentComment(visibleThreads().map(thread => ({ id: thread.id, from: locate(thread).from })),
-    selectedThread, editor.state.selection.main.head, direction);
-  if (!id) return;
-  focusCard(id);
-  const thread = review.threads.find(thread => thread.id === id), loc = locate(thread);
-  editor.dispatch({ selection: { anchor: loc.from, head: loc.to }, effects: EditorView.scrollIntoView(loc.from, { y: 'center' }) });
-  refreshDecorations(); editor.focus();
+  const threads = manuscriptThreads();
+  let at = threads.findIndex(thread => thread.id === selectedThread);
+  if (at < 0) {
+    const fileIndex = (review.files || [review.file]).indexOf(review.file);
+    const line = editor.state.doc.lineAt(editor.state.selection.main.head).number;
+    at = direction > 0
+      ? threads.findIndex(thread => (review.files || [review.file]).indexOf(thread.file) > fileIndex || thread.file === review.file && thread.range.startLine >= line)
+      : threads.findLastIndex(thread => (review.files || [review.file]).indexOf(thread.file) < fileIndex || thread.file === review.file && thread.range.startLine <= line);
+    if (at < 0) at = direction > 0 ? 0 : threads.length - 1;
+  } else at = (at + direction + threads.length) % threads.length;
+  if (threads[at]) jumpThread(threads[at]);
 }
+function requestNavigation(request) {
+  if (navigationSent) return;
+  pendingNavigation = request; flush(); finishNavigation();
+}
+function finishNavigation() {
+  if (!pendingNavigation || navigationSent || !editor || composing || inflight !== null || commentPending || pendingComment || saveRequested || buildRequested !== null || editor.state.doc.toString() !== confirmed) return;
+  if (conflictDraft) { $('error').textContent = t('Resolve unsaved changes before switching files.'); pendingNavigation = null; return; }
+  const request = pendingNavigation; pendingNavigation = null; navigationSent = true;
+  send('navigate', { target: request.file, selection: request.selection, thread: request.thread, root: request.root, explicit: request.explicit });
+}
+function renderOverview() {
+  const threads = manuscriptThreads();
+  $('previousComment').disabled = $('nextComment').disabled = threads.length === 0;
+  $('overviewCount').textContent = review.threads.filter(thread => (review.files || []).includes(thread.file) && thread.status === 'open').length || '';
+  const list = $('commentOverview');
+  list.hidden = !overview; $('cards').hidden = overview;
+  $('currentComments').classList.toggle('active', !overview); $('allComments').classList.toggle('active', overview);
+  $('currentComments').setAttribute('aria-pressed', String(!overview)); $('allComments').setAttribute('aria-pressed', String(overview));
+  if (!overview) return;
+  list.replaceChildren();
+  if (!threads.length) { list.append(make('p', t('No comments in this manuscript.'), 'overview-empty')); return; }
+  let group;
+  for (const thread of threads) {
+    if (group !== thread.file) { group = thread.file; list.append(make('h3', group, 'overview-file')); }
+    const entry = button(undefined, () => { overview = false; jumpThread(thread); renderOverview(); scheduleLayout(); saveState(); });
+    entry.className = 'overview-comment' + (selectedThread === thread.id ? ' active' : '');
+    entry.setAttribute('aria-current', String(selectedThread === thread.id));
+    entry.append(make('small', t('Line {0}', thread.range.startLine)), make('span', thread.comments[0]?.body || thread.snapshot));
+    list.append(entry);
+  }
+}
+$('allComments').addEventListener('click', () => { overview = true; renderOverview(); saveState(); });
+$('currentComments').addEventListener('click', () => { overview = false; renderOverview(); scheduleLayout(); saveState(); });
+$('sources').addEventListener('change', () => requestNavigation({ file: $('sources').value }));
 $('previousComment').addEventListener('click', () => navigateComment(-1));
 $('nextComment').addEventListener('click', () => navigateComment(1));
 function clearCards() { for (const c of cards.values()) c.element.remove(); cards.clear(); }
@@ -305,7 +388,7 @@ function renderComments() {
   if (!editor) return;
   const currentIds = new Set();
   const threads = visibleThreads();
-  $('previousComment').disabled = $('nextComment').disabled = threads.length === 0;
+  renderOverview();
   for (const thread of threads) {
     currentIds.add(thread.id);
     const loc = locate(thread);
@@ -430,6 +513,7 @@ function applyPdfPosition(message) {
   busyButton('syncPdf', false, 'Sync PDF', 'Synchronizing PDF…');
   $('syncStatus').textContent = t('Line {0} → PDF page {1}', message.line, message.page);
 }
+new ResizeObserver(() => { scheduleLayout(); schedulePdf(); }).observe($('workspace'));
 const pdfView = new ContinuousPdf($('pdfScroll'), {
   onPage(page) { pdfPage = page; $('pageNumber').value = page; },
   onInverse(location) { send('inverse', location); },
@@ -499,8 +583,8 @@ const scrollComments = commentScrollHandler(
   },
   element => element instanceof Element ? parseFloat(getComputedStyle(element).lineHeight) || editor.defaultLineHeight : editor.defaultLineHeight,
 );
-$('comments').addEventListener('wheel', scrollComments, { passive: false });
-$('roots').addEventListener('change', () => send('selectRoot', { root: $('roots').value }));
+$('comments').addEventListener('wheel', event => { if (!overview) scrollComments(event); }, { passive: false });
+$('roots').addEventListener('change', () => requestNavigation({ file: $('roots').value, root: $('roots').value, explicit: true }));
 $('selectPdf').addEventListener('click', () => send('selectPdf'));
 $('prevPage').addEventListener('click', () => { if (pdf && pdfPage > 1) { pdfView.goTo(pdfPage - 1); } });
 $('nextPage').addEventListener('click', () => { if (pdf && pdfPage < pdf.numPages) { pdfView.goTo(pdfPage + 1); } });
@@ -559,18 +643,24 @@ function acceptPendingReview() {
     }
     renderComments();
     if (pendingCompose) { pendingCompose = false; compose(); }
+    if (pendingThread) { const thread = review.threads.find(thread => thread.id === pendingThread); pendingThread = null; if (thread) jumpThread(thread); }
+    const sources = $('sources'); sources.replaceChildren(...(review.files || [review.file]).map(file => { const option = make('option', file); option.value = file; return option; }));
+    if (!(review.files || []).includes(review.file)) { const option = make('option', review.file); option.value = review.file; sources.append(option); }
+    sources.value = review.file; sources.title = review.file; saveState();
 
 }
 window.addEventListener('message', event => timings.measure(`message.${event.data?.type || 'unknown'}`, () => {
   const m = event.data;
-  if (m.type === 'action') {
+  if (m.file && m.file !== review.file && !['source', 'init', 'requestNavigation'].includes(m.type)) return;
+  if (m.type === 'requestNavigation') { requestNavigation(m); }
+  else if (m.type === 'action') {
     if (m.action === 'fullBuild') { requestedBuildMode = 'full'; $('buildPdf').click(); }
     else if (m.action === 'openNative') { openNativeRequested = true; requestSave(); }
     else if (m.action === 'toggleComments' || m.action === 'togglePdf') {
       const toggle = $(m.action === 'toggleComments' ? 'showComments' : 'showPdf'); toggle.checked = !toggle.checked; setColumns();
     }
   }
-  else if (m.type === 'init') { initialize(m); setColumns(); }
+  else if (m.type === 'init' || m.type === 'source') { initialize(m); setColumns(); }
   else if (['document', 'ack', 'conflict'].includes(m.type)) applyDocument(m);
   else if (m.type === 'activateSelection') {
     const length = editor.state.doc.length;
@@ -592,9 +682,9 @@ window.addEventListener('message', event => timings.measure(`message.${event.dat
     drafts[key(m.key)] = ''; commentPending = false;
     if (m.key === 'new') { cards.get('new')?.element.remove(); cards.delete('new'); draftTarget = null; }
     else { cards.get(m.key)?.element.remove(); cards.delete(m.key); }
-    saveState(); $('error').textContent = '';
-  } else if (m.type === 'error') { pendingComment = null; commentPending = false; busyButton('buildPdf', false, 'Build PDF', 'Building PDF…'); busyButton('syncPdf', false, 'Sync PDF', 'Synchronizing PDF…'); $('error').textContent = m.error; }
-  else if (m.type === 'building') { $('buildMode').disabled = m.busy; busyButton('buildPdf', m.busy, 'Build PDF', 'Building PDF…'); if (m.busy) $('status').textContent = t('Building PDF…'); }
+    saveState(); $('error').textContent = ''; finishNavigation();
+  } else if (m.type === 'error') { pendingNavigation = null; navigationSent = false; pendingComment = null; commentPending = false; busyButton('buildPdf', false, 'Build PDF', 'Building PDF…'); busyButton('syncPdf', false, 'Sync PDF', 'Synchronizing PDF…'); $('error').textContent = m.error; }
+  else if (m.type === 'building') { $('buildMode').disabled = $('roots').disabled = m.busy; busyButton('buildPdf', m.busy, 'Build PDF', 'Building PDF…'); if (m.busy) $('status').textContent = t('Building PDF…'); }
   else if (m.type === 'syncing') { if (m.request === syncRequest) busyButton('syncPdf', m.busy || !!pendingPdfJump, 'Sync PDF', 'Synchronizing PDF…'); }
   else if (m.type === 'built') { $('status').textContent = m.unchanged ? t('PDF is up to date') : m.mode === 'preview' ? t('Preview · {0}s', m.seconds) : t('Built · {0}s', m.seconds); $('status').title = m.mode === 'preview' ? t('References may need a full build') : ''; forward(); }
   else if (m.type === 'exported') $('status').textContent = t('Exported {0} threads ({1} skipped)', m.count, m.skipped);

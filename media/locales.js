@@ -1,4 +1,7 @@
 const ja = {
+  "File": "ファイル", "Manuscript": "原稿全体", "Source file": "本文ファイル",
+  "No comments in this manuscript.": "この原稿にコメントはありません。",
+  "Resolve unsaved changes before switching files.": "ファイルを切り替える前に未反映の変更を確認してください。",
   "Update selection": "対象を選び直す",
   "The selected passage changed. Select the text and use Update selection.": "対象の本文が変わっています。本文を選択して「対象を選び直す」を押してください。",
   "Build mode": "ビルド方式",

@@ -27,7 +27,8 @@
   "main": "./dist/extension.js",
   "activationEvents": [
     "onStartupFinished",
-    "onCustomEditor:texReview.editor"
+    "onCustomEditor:texReview.editor",
+    "onWebviewPanel:texReview.session"
   ],
   "contributes": {
     "commands": [

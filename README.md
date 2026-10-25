@@ -11,7 +11,8 @@ anchored to the source text.
 
 ## Features
 
-- TeX source, threaded comments, and PDF preview in a single editor.
+- One manuscript tab for TeX source, threaded comments, and PDF preview.
+- A manuscript-wide comment list and navigation across included TeX files.
 - PDF builds and bidirectional source–PDF navigation through SyncTeX.
 - Comparison against a Git commit or another TeX file.
 - Comments and replies exported as PDF annotations.

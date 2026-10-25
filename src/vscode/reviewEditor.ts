@@ -14,6 +14,7 @@ import { parseForward, parseInverse } from '../core/synctex';
 import { texBuildPlan, previewIsCurrent, BuildMode } from '../core/texBuild';
 import { pdfSyncIssue } from '../core/pdfSync';
 import { projectTargets, targetPdf } from '../core/projectTargets';
+import { projectSources } from '../core/projectSources';
 import { annotatedPdf, LocatedThread } from '../core/annotatedPdf';
 import { Baseline, baselineText, checkpoint, checkpoints } from '../core/baseline';
 import { ActiveThemeIdentity } from '../core/activeTheme';
@@ -24,7 +25,10 @@ import { rejectSymlink } from '../core/safePaths';
 const run = promisify(execFile);
 export class ReviewEditor implements vscode.CustomTextEditorProvider {
   static readonly viewType = 'texReview.editor';
-  private panels = new Map<string, vscode.WebviewPanel>();
+  private session?: vscode.WebviewPanel;
+  private sessionSource?: string;
+  private sessionReady = false;
+  private pendingOpen?: object;
   private selections = new Map<string, { from: number; to: number; compose?: boolean }>();
   private selectedRoot?: string;
   private nativeSyntax?: ReturnType<typeof workbenchSyntax>;
@@ -52,23 +56,63 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
 
   async open(compose = false): Promise<void> {
     const editor = vscode.window.activeTextEditor;
-    if (!editor || editor.document.uri.scheme !== 'file') return;
-    const key = editor.document.uri.toString();
-    const normalizedOffset = (pos: vscode.Position) => { const raw = editor.document.offsetAt(pos); return editor.document.getText ? editor.document.getText().slice(0, raw).replace(/\r\n/g, '\n').length : raw; };
-    const selection = { from: normalizedOffset(editor.selection.start), to: normalizedOffset(editor.selection.end), compose };
-    const existing = this.panels.get(key);
-    this.selections.set(key, selection);
-    await vscode.commands.executeCommand('vscode.openWith', editor.document.uri, ReviewEditor.viewType);
-    if (existing) await existing.webview.postMessage({ type: 'activateSelection', ...selection });
+    if (!editor || editor.document.uri.scheme !== 'file' || !/\.tex$/i.test(editor.document.uri.fsPath)) {
+      if (this.session) { this.session.reveal(); return; }
+      const last = this.context.workspaceState.get<string>('texReview.source');
+      const root = last || this.selectedRoot || projectTargets(this.folder.uri.fsPath)[0]?.root;
+      if (root) await this.openSource(await vscode.workspace.openTextDocument(vscode.Uri.file(workspaceFile(this.folder.uri.fsPath, root))));
+      return;
+    }
+    const normalizedOffset = (pos: vscode.Position) => sourceText(editor.document.getText().slice(0, editor.document.offsetAt(pos))).length;
+    await this.openSource(editor.document, { from: normalizedOffset(editor.selection.start), to: normalizedOffset(editor.selection.end), compose });
   }
 
+  private async openSource(document: vscode.TextDocument, selection?: { from: number; to: number; compose?: boolean }): Promise<void> {
+    const file = path.relative(this.folder.uri.fsPath, document.uri.fsPath);
+    workspaceFile(this.folder.uri.fsPath, file);
+    if (this.session) {
+      this.session.reveal();
+      const roots = projectTargets(this.folder.uri.fsPath);
+      const selectedFiles = projectSources(this.folder.uri.fsPath, this.selectedRoot, this.selectedRoot ? targetPdf(this.folder.uri.fsPath, this.selectedRoot) : undefined).files;
+      const targetRoot = selectedFiles.includes(file) ? this.selectedRoot : roots.find(t => projectSources(this.folder.uri.fsPath, t.root, t.pdf).files.includes(file))?.root;
+      const request = { type: 'requestNavigation', file, selection, root: targetRoot, explicit: true };
+      if (this.sessionReady) await this.session.webview.postMessage(request);
+      else this.pendingOpen = request;
+      return;
+    }
+    this.selections.set(document.uri.toString(), selection || { from: 0, to: 0 });
+    const panel = vscode.window.createWebviewPanel('texReview.session', 'TeX Review', vscode.ViewColumn.Active,
+      { enableScripts: true, retainContextWhenHidden: true });
+    this.session = panel;
+    await this.attachSession(document, panel);
+  }
+
+  async restore(panel: vscode.WebviewPanel, state?: unknown): Promise<void> {
+    if (this.session) { panel.dispose(); this.session.reveal(); return; }
+    const saved = state && typeof state === 'object' && 'file' in state && typeof state.file === 'string' ? state.file : undefined;
+    const file = saved || this.context.workspaceState.get<string>('texReview.source') || this.selectedRoot;
+    if (!file) { panel.dispose(); return; }
+    try {
+      const document = await vscode.workspace.openTextDocument(vscode.Uri.file(workspaceFile(this.folder.uri.fsPath, file)));
+      this.session = panel;
+      await this.attachSession(document, panel);
+    } catch (error) { panel.dispose(); throw error; }
+  }
+
+  // Keep Open With support, while all entry points converge on the one manuscript session.
   async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): Promise<void> {
-    this.panels.set(document.uri.toString(), panel);
+    await this.openSource(document);
+    panel.dispose();
+  }
+
+  private async attachSession(document: vscode.TextDocument, panel: vscode.WebviewPanel): Promise<void> {
     const root = this.folder.uri.fsPath;
-    const file = path.relative(root, document.uri.fsPath);
+    let file = path.relative(root, document.uri.fsPath);
+    this.sessionSource = file;
+    const visited = new Map<string, vscode.TextDocument>([[file, document]]);
     const roots = projectTargets(root);
-    if (!roots.some(t => t.root === this.selectedRoot)) this.selectedRoot = roots.find(t => t.root === file)?.root
-      ?? roots.find(t => t.root === (file.includes('/ja/') ? 'main_ja.tex' : 'main.tex'))?.root ?? roots[0]?.root;
+    if (!roots.some(t => t.root === this.selectedRoot && projectSources(root, t.root, t.pdf).files.includes(file))) this.selectedRoot = roots.find(t => t.root === file)?.root
+      ?? roots.find(t => projectSources(root, t.root, t.pdf).files.includes(file))?.root ?? roots[0]?.root;
     workspaceFile(root, file);
     this.service.updateDocument(file, document.getText(), undefined, document.isDirty);
     const normalizedText = () => sourceText(document.getText());
@@ -98,7 +142,42 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     let lastReview = '';
     let lastSyntax: { syntax: Awaited<ReturnType<typeof workbenchSyntax>>; version: number } | undefined;
-    const post = (m: unknown) => { if (!disposed) void panel.webview.postMessage(m); };
+    const post = (m: object) => { if (!disposed) void panel.webview.postMessage({ file, ...m }); };
+    const updateTitle = () => { panel.title = `${[...visited.values()].some(doc => doc.isDirty) ? '● ' : ''}TeX Review${this.selectedRoot ? ' · ' + path.basename(this.selectedRoot, '.tex') : ''}`; };
+    let scopeCache: { key: string; value: ReturnType<typeof projectSources> } | undefined;
+    const sourceScope = () => {
+      const record = pdfPath?.replace(/\.pdf$/i, '.fls');
+      let stamp = 0; try { stamp = fs.statSync(record || '').mtimeMs; } catch {}
+      const key = `${this.selectedRoot || file}:${pdfPath}:${stamp}`;
+      if (scopeCache?.key !== key) scopeCache = { key, value: projectSources(root, this.selectedRoot || file, pdfPath) };
+      return scopeCache.value;
+    };
+    const watchSource = () => {
+      const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(path.dirname(document.uri.fsPath)), path.basename(document.uri.fsPath)));
+      watcher.onDidChange(sourceChanged, undefined, disposables);
+      watcher.onDidCreate(sourceChanged, undefined, disposables);
+      return watcher;
+    };
+    const postSource = (kind = 'source', selection?: object, thread?: string) => {
+      post({ type: kind, text: normalizedText().toString(), version: document.version, file,
+        selection, thread, config: config(),
+        worker: panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'pdf.worker.mjs')).toString() });
+    };
+    const switchSource = async (nextFile: string, selection?: object, thread?: string) => {
+      const target = workspaceFile(root, nextFile);
+      if (!/\.tex$/i.test(target)) throw new Error('Not a TeX source.');
+      const next = await vscode.workspace.openTextDocument(vscode.Uri.file(target));
+      if (disposed) return;
+      ++syntaxGeneration; ++comparisonGeneration; ++syncGeneration;
+      clearTimeout(sourceTimer); clearTimeout(syntaxTimer);
+      sourceWatcher.dispose();
+      document = next; file = nextFile; this.sessionSource = file; visited.set(file, document);
+      documentHistory.clear(); rememberDocument(); lastSyntax = undefined; lastComparison = ''; lastReview = '';
+      this.service.updateDocument(file, document.getText(), undefined, document.isDirty);
+      sourceWatcher = watchSource();
+      await this.context.workspaceState.update('texReview.source', file);
+      postSource('source', selection, thread); review(); scheduleSyntax(); await comparisonState(); updateTitle();
+    };
     const syntaxState = async () => {
       if (!activeTheme || disposed || !panel.visible) return;
       const generation = ++syntaxGeneration, version = document.version, text = document.getText();
@@ -178,7 +257,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
     const review = () => {
       const started = performance.now();
       const message = { type: 'review', active: this.service.active(), reviews: this.service.list(),
-        threads: this.service.active() ? this.service.refreshView()?.threads : [], file, version: document.version, config: config() };
+        threads: this.service.active() ? this.service.refreshView()?.threads : [], files: sourceScope().files, file, version: document.version, config: config() };
       const signature = JSON.stringify(message);
       if (signature !== lastReview) { lastReview = signature; post(message); }
       this.recordPerformance({ phase: 'comments.refresh', milliseconds: performance.now() - started });
@@ -186,15 +265,14 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
     const docState = (kind = 'document') => post({ type: kind, text: normalizedText().toString(), version: document.version });
     const pdfState = () => post({ type: 'pdf', uri: pdfPath ? panel.webview.asWebviewUri(vscode.Uri.file(pdfPath)).toString() + '?v=' + fs.statSync(pdfPath).mtimeMs : null,
       name: pdfPath ? path.relative(root, pdfPath) : null, roots: projectTargets(root).map(t => t.root), selectedRoot: this.selectedRoot });
-    disposables.push(this.targetChanged.event(() => { pdfPath = this.findPdf(document); pdfState(); }));
+    disposables.push(this.targetChanged.event(() => { pdfPath = this.findPdf(document); pdfState(); review(); updateTitle(); }));
     panel.webview.options = { enableScripts: true, localResourceRoots: [this.folder.uri, vscode.Uri.joinPath(this.context.extensionUri, 'media')] };
     panel.webview.html = this.html(panel.webview);
     const onChange = vscode.workspace.onDidChangeTextDocument(e => {
-      if (e.document.uri.toString() === document.uri.toString()) { rememberDocument(); if (ready && panel.visible) { if (!applying) { docState(); review(); } scheduleSyntax(); } }
+      if (e.document.uri.toString() === document.uri.toString()) { rememberDocument(); updateTitle(); if (ready && panel.visible) { if (!applying) { docState(); review(); } scheduleSyntax(); } }
     });
     disposables.push(onChange);
     // An exact, non-recursive watch is not subject to recursive watcher exclusions.
-    const sourceWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(path.dirname(document.uri.fsPath)), path.basename(document.uri.fsPath)));
     const sourceChanged = () => {
       clearTimeout(sourceTimer);
       sourceTimer = setTimeout(() => {
@@ -206,9 +284,9 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
         }).catch(error => post({ type: 'error', error: String(error) }));
       }, 250);
     };
-    sourceWatcher.onDidChange(sourceChanged, undefined, disposables);
-    sourceWatcher.onDidCreate(sourceChanged, undefined, disposables);
-    disposables.push(sourceWatcher);
+    let sourceWatcher = watchSource();
+    disposables.push({ dispose: () => sourceWatcher.dispose() });
+    disposables.push(vscode.workspace.onDidSaveTextDocument(() => { scopeCache = undefined; updateTitle(); if (ready) review(); }));
     const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(path.join(root, '.review')), '*'));
     const changed = (uri: vscode.Uri) => {
       if (!ready || !panel.visible) return;
@@ -286,6 +364,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
       if (!rootFile) throw new Error(vscode.l10n.t('Select a root document first.'));
       this.building = true; post({ type: 'building', busy: true });
       try {
+        for (const doc of visited.values()) if (doc.isDirty && !await doc.save()) throw new Error(vscode.l10n.t('Unable to save the source.'));
         const sourceRoot = workspaceFile(root, rootFile);
         const stem = path.basename(rootFile, '.tex');
         const out = workspaceFile(root, 'build/tex-review/' + stem);
@@ -318,12 +397,25 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
           }
           if (m.type === 'theme') return;
         }
+        if (m.file && m.file !== file && !['navigate', 'ready', 'theme'].includes(m.type)) return;
+        if (m.type === 'navigate') {
+          if (typeof m.target !== 'string') return;
+          const allowed = sourceScope().files.includes(m.target) || m.target === this.sessionSource;
+          if (!allowed && !m.explicit) throw new Error('Source is outside the selected manuscript.');
+          if (m.root && projectTargets(root).some(t => t.root === m.root)) {
+            this.selectedRoot = m.root; await this.context.workspaceState.update('texReview.root', m.root);
+            pdfPath = this.findPdf(document); pdfState();
+          }
+          await switchSource(m.target, m.selection, typeof m.thread === 'string' ? m.thread : undefined);
+          return;
+        }
         if (m.type === 'ready') {
-          ready = true; lastComparison = ''; lastReview = ''; lastSyntax = undefined;
-          post({ type: 'init', text: normalizedText().toString(), version: document.version, file,
-            selection: this.selections.get(document.uri.toString()), compose: this.selections.get(document.uri.toString())?.compose, config: config(),
-            worker: panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'pdf.worker.mjs')).toString() });
-          review(); pdfState(); scheduleSyntax(); await comparisonState(); return;
+          ready = true; this.sessionReady = true; lastComparison = ''; lastReview = ''; lastSyntax = undefined;
+          const selection = this.selections.get(document.uri.toString());
+          postSource('init', selection);
+          review(); pdfState(); scheduleSyntax(); await comparisonState(); updateTitle();
+          if (this.pendingOpen) { post(this.pendingOpen); this.pendingOpen = undefined; }
+          return;
         }
         if (m.type === 'reviewActions') {
           // Native workbench UI; keep modal interactions outside the document edit queue.
@@ -411,7 +503,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
         if (m.type === 'exportComments') {
           void exportComments().catch(e => post({ type: 'error', error: String(e.message ?? e) })); return;
         }
-        if (m.type === 'save') { await document.save(); post({ type: 'savedDocument' }); return; }
+        if (m.type === 'save') { await document.save(); updateTitle(); post({ type: 'savedDocument' }); return; }
         if (m.type === 'undo' || m.type === 'redo') { await vscode.commands.executeCommand(m.type); return; }
         if (m.type === 'compareUnsaved' && typeof m.text === 'string') {
           const recovered = await vscode.workspace.openTextDocument({ content: m.text, language: document.languageId });
@@ -448,15 +540,11 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
           const hit = parseInverse(await synctex(['edit', '-o', `${m.page}:${m.x}:${m.y}:${pdfPath}`]));
           if (!hit) { post({ type: 'syncStatus', message: vscode.l10n.t("No matching source location found.") }); return; }
           const absolute = path.isAbsolute(hit.file) ? hit.file : path.resolve(root, hit.file);
-          workspaceFile(root, path.relative(root, absolute));
+          const sourceFile = path.relative(fs.realpathSync(root), fs.realpathSync(absolute));
+          workspaceFile(root, sourceFile);
           if (fs.realpathSync(absolute) === fs.realpathSync(document.uri.fsPath)) post({ type: 'sourcePosition', line: hit.line, column: hit.column });
-          else {
-            const target = vscode.Uri.file(absolute);
-            const doc = await vscode.workspace.openTextDocument(target);
-            const pos = doc.positionAt(doc.offsetAt(new vscode.Position(Math.min(hit.line - 1, doc.lineCount - 1), hit.column - 1)));
-            this.selections.set(target.toString(), { from: doc.offsetAt(pos), to: doc.offsetAt(pos) });
-            await vscode.commands.executeCommand('vscode.openWith', target, ReviewEditor.viewType);
-          }
+          else post({ type: 'requestNavigation', file: sourceFile,
+            selection: { line: hit.line, column: hit.column } });
           return;
         }
         if (m.type === 'switch') {
@@ -466,7 +554,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
         if (m.type === 'openNative') {
           const from = Math.max(0, Math.min(document.getText().length, Number(m.from) || 0));
           const to = Math.max(from, Math.min(document.getText().length, Number(m.to) || from));
-          await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
+          // Preserve the manuscript session when opening a normal source editor.
           await vscode.window.showTextDocument(document, { selection: new vscode.Range(nativePosition(from), nativePosition(to)) });
           return;
         }
@@ -526,7 +614,14 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
         }
       }).catch(e => post({ type: 'error', error: String(e instanceof Error ? e.message : e) }));
     }, undefined, disposables);
-    panel.onDidDispose(() => { this.panels.delete(document.uri.toString()); disposed = true; clearTimeout(activationTimer); clearTimeout(pdfTimer); clearTimeout(sourceTimer); if (syntaxTimer) clearTimeout(syntaxTimer); if (refreshTimer) clearTimeout(refreshTimer); for (const d of disposables) d.dispose(); });
+    panel.onDidDispose(() => {
+      this.session = undefined; this.sessionSource = undefined; this.sessionReady = false; disposed = true;
+      clearTimeout(activationTimer); clearTimeout(pdfTimer); clearTimeout(sourceTimer);
+      if (syntaxTimer) clearTimeout(syntaxTimer); if (refreshTimer) clearTimeout(refreshTimer);
+      for (const d of disposables) d.dispose();
+      // Keep dirty native documents visible and subject to the workbench's normal save/close handling.
+      for (const doc of visited.values()) if (doc.isDirty) void vscode.window.showTextDocument(doc, { preview: false, preserveFocus: true });
+    });
   }
 
   private findPdf(document: vscode.TextDocument): string | undefined {
@@ -549,10 +644,10 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
       <label class="icon-toggle" title="${tr('PDF')}"><input id="showPdf" type="checkbox" checked aria-label="${tr('PDF')}">${icon('panelRight')}</label>
       <label class="icon-toggle" title="${tr('Compare with baseline')}"><input id="showComparison" type="checkbox" aria-label="${tr('Compare with baseline')}">${icon('compare')}</label>
       <button id="save" class="icon-button" title="${tr('Save')} · ⌘S" aria-label="${tr('Save')}">${icon('save')}</button>
-</div><div id="comparisonBar" hidden><span id="baselineLabel"></span><button id="previousChange" class="icon-button" title="${tr('Previous change')}" aria-label="${tr('Previous change')}">${icon('left')}</button><button id="nextChange" class="icon-button" title="${tr('Next change')}" aria-label="${tr('Next change')}">${icon('right')}</button><button id="refreshBaseline" class="icon-button" title="${tr('Refresh baseline')}" aria-label="${tr('Refresh baseline')}">${icon('sync')}</button></div><span id="status" role="status"></span><span class="spacer"></span><nav id="pdfControls" class="pdf-toolbar"><button id="buildPdf" class="icon-button" aria-label="${tr('Build PDF')}" title="${tr('Build PDF')}">${icon('build')}</button><select id="buildMode" class="target-select build-mode" aria-label="${tr('Build mode')}" title="${tr('Build mode')}"><option value="preview" title="${tr('Draft build (one TeX pass)')}">${tr('Draft')}</option><option value="full" title="${tr('Full build (references and bibliography)')}">${tr('Full')}</option></select><select id="roots" class="target-select" aria-label="${tr('Build target')}" title="${tr('Build target')}"></select><button id="selectPdf" class="icon-button" aria-label="${tr('Select PDF')}" title="${tr('Select PDF')}">${icon('file')}</button><button id="prevPage" class="icon-button" title="${tr('Previous page')}" aria-label="${tr('Previous page')}">${icon('left')}</button><input id="pageNumber" aria-label="${tr('PDF page')}" type="number" min="1" value="1"><span id="pageCount"></span><button id="nextPage" class="icon-button" title="${tr('Next page')}" aria-label="${tr('Next page')}">${icon('right')}</button><span class="toolbar-divider"></span><button id="syncPdf" class="icon-button" title="${tr('Sync PDF')}" aria-label="${tr('Sync PDF')}">${icon('sync')}</button></nav><button id="reviewMenu" class="icon-button" title="${tr('Review options')}" aria-label="${tr('Review options')}">${icon('more')}</button></header>
+</div><select id="sources" class="target-select source-select" aria-label="${tr('Source file')}" title="${tr('Source file')}"></select><div id="comparisonBar" hidden><span id="baselineLabel"></span><button id="previousChange" class="icon-button" title="${tr('Previous change')}" aria-label="${tr('Previous change')}">${icon('left')}</button><button id="nextChange" class="icon-button" title="${tr('Next change')}" aria-label="${tr('Next change')}">${icon('right')}</button><button id="refreshBaseline" class="icon-button" title="${tr('Refresh baseline')}" aria-label="${tr('Refresh baseline')}">${icon('sync')}</button></div><span id="status" role="status"></span><span class="spacer"></span><nav id="pdfControls" class="pdf-toolbar"><button id="buildPdf" class="icon-button" aria-label="${tr('Build PDF')}" title="${tr('Build PDF')}">${icon('build')}</button><select id="buildMode" class="target-select build-mode" aria-label="${tr('Build mode')}" title="${tr('Build mode')}"><option value="preview" title="${tr('Draft build (one TeX pass)')}">${tr('Draft')}</option><option value="full" title="${tr('Full build (references and bibliography)')}">${tr('Full')}</option></select><select id="roots" class="target-select" aria-label="${tr('Build target')}" title="${tr('Build target')}"></select><button id="selectPdf" class="icon-button" aria-label="${tr('Select PDF')}" title="${tr('Select PDF')}">${icon('file')}</button><button id="prevPage" class="icon-button" title="${tr('Previous page')}" aria-label="${tr('Previous page')}">${icon('left')}</button><input id="pageNumber" aria-label="${tr('PDF page')}" type="number" min="1" value="1"><span id="pageCount"></span><button id="nextPage" class="icon-button" title="${tr('Next page')}" aria-label="${tr('Next page')}">${icon('right')}</button><span class="toolbar-divider"></span><button id="syncPdf" class="icon-button" title="${tr('Sync PDF')}" aria-label="${tr('Sync PDF')}">${icon('sync')}</button></nav><button id="reviewMenu" class="icon-button" title="${tr('Review options')}" aria-label="${tr('Review options')}">${icon('more')}</button></header>
       <div id="deletionNotice" role="status" hidden><span>${tr('Deleted.')}</span><button id="undoDelete">${tr('Undo')}</button><button id="dismissDelete" aria-label="${tr('Dismiss')}">×</button></div>
       <div id="error" role="alert"></div>
-      <div id="workspace"><aside id="comments"><div id="commentHeader"><span>${tr('Comments')} <span id="commentCount" class="count"></span></span><nav class="comment-navigation" aria-label="${tr('Comment navigation')}"><button id="previousComment" class="icon-button" disabled title="${tr('Previous comment')}" aria-label="${tr('Previous comment')}">${icon('up')}</button><button id="nextComment" class="icon-button" disabled title="${tr('Next comment')}" aria-label="${tr('Next comment')}">${icon('down')}</button></nav><label class="resolved-filter" title="${tr('Show resolved')}"><input id="resolved" type="checkbox">${tr('Resolved')}</label></div><div id="cards"></div></aside>
+      <div id="workspace"><aside id="comments"><div id="commentHeader"><div class="comment-scope"><button id="currentComments" class="scope-button active" aria-pressed="true">${tr('File')} <span id="commentCount" class="count"></span></button><button id="allComments" class="scope-button" aria-pressed="false">${tr('Manuscript')} <span id="overviewCount" class="count"></span></button></div><nav class="comment-navigation" aria-label="${tr('Comment navigation')}"><button id="previousComment" class="icon-button" disabled title="${tr('Previous comment')}" aria-label="${tr('Previous comment')}">${icon('up')}</button><button id="nextComment" class="icon-button" disabled title="${tr('Next comment')}" aria-label="${tr('Next comment')}">${icon('down')}</button></nav><label class="resolved-filter" title="${tr('Show resolved')}"><input id="resolved" type="checkbox">${tr('Resolved')}</label></div><div id="cards"></div><div id="commentOverview" hidden></div></aside>
       <div class="resizer" id="resizeComments" role="separator" aria-label="${tr('Comments column width')}" tabindex="0"></div><main id="source"></main>
       <div class="resizer" id="resizePdf" role="separator" aria-label="${tr('PDF column width')}" tabindex="0"></div><section id="pdf"><div id="syncStatus" role="status" aria-live="polite"></div><div id="pdfScroll"></div></section></div>
       <script nonce="${nonce}" src="${resource('editor.bundle.js')}"></script></body></html>`;
