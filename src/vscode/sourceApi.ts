@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as net from 'node:net';
 import { randomUUID } from 'node:crypto';
+import { CommentMutations } from './commentMutations';
 import { SourceTransactions } from './sourceTransactions';
 import { ReviewService } from './reviewService';
 import { sourceText } from '../core/commentAnchors';
@@ -32,6 +33,7 @@ export async function startSourceApi(context: vscode.ExtensionContext, folder: v
     catch (error) {
         void vscode.window.showErrorMessage(`TeX Review: ${String(error)}`);
     }
+    const comments = new CommentMutations(root, service, transactions);
     const session = randomUUID();
     const socketDirectory = process.platform === 'win32' ? undefined : fs.mkdtempSync(path.join(os.tmpdir(), 'tr-'));
     const endpoint = process.platform === 'win32' ? `\\\\.\\pipe\\tex-review-${session}` : path.join(socketDirectory!, 'api.sock');
@@ -73,10 +75,12 @@ export async function startSourceApi(context: vscode.ExtensionContext, folder: v
                         result = await transactions.read(request.file);
                     else if (request.op === 'transact')
                         result = await transactions.transact(request.transaction);
+                    else if (request.op === 'comment')
+                        result = await comments.mutate(request.comment);
                     else if (request.op === 'recover')
                         result = await transactions.recover() || { pending: false };
                     else
-                        throw new Error('Unknown operation. Use read, transact, or recover.');
+                        throw new Error('Unknown operation. Use read, transact, comment, or recover.');
                     socket.end(JSON.stringify({ ok: true, result }) + '\n');
                 }
                 catch (error) {
@@ -94,7 +98,7 @@ export async function startSourceApi(context: vscode.ExtensionContext, folder: v
     rejectSymlink(path.dirname(descriptor));
     rejectSymlink(descriptor);
     const temporary = descriptor + '.' + session + '.tmp';
-    fs.writeFileSync(temporary, JSON.stringify({ protocol: 1, session, endpoint, cli: path.join(context.extensionUri.fsPath, 'bin/tex-review.mjs') }, null, 2), { mode: 0o600, flag: 'wx' });
+    fs.writeFileSync(temporary, JSON.stringify({ protocol: 1, capabilities: ['read', 'transact', 'comment', 'recover'], session, endpoint, cli: path.join(context.extensionUri.fsPath, 'bin/tex-review.mjs') }, null, 2), { mode: 0o600, flag: 'wx' });
     fs.renameSync(temporary, descriptor);
     context.subscriptions.push({ dispose() {
             disposed = true;

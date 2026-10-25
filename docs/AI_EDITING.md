@@ -1,9 +1,10 @@
-# Editing source and comment locations together
+# Local source and comment API
 
 TeX Review provides a local API for AI coding assistants. A transaction changes
 one TeX source and assigns its affected comments to explicit destinations in the
 resulting text. Original comments, replies, and quoted snapshots are preserved.
-The API never resolves or deletes a thread.
+Source transactions never resolve or delete a thread. Explicit comment operations
+can reply, change tags, resolve, or reopen an existing thread.
 
 The extension must be running in a trusted workspace. Run the client from that
 workspace's root. `.review/api.json` contains the installed client's `cli` path;
@@ -12,9 +13,10 @@ use that path with Node.js 22.12 or later:
 ```sh
 node /path/from/api.json/tex-review.mjs read chapters/introduction.tex
 node /path/from/api.json/tex-review.mjs transact request.json
+node /path/from/api.json/tex-review.mjs comment comment-request.json
 ```
 
-`transact` also accepts JSON on stdin. This is same-user local IPC, using a Unix
+`transact` and `comment` also accept JSON on stdin. This is same-user local IPC, using a Unix
 socket (a named pipe on Windows). It opens no TCP port and sends no manuscript to
 a remote service. Keep `.review/` out of Git.
 
@@ -60,6 +62,51 @@ Set `"dryRun": true` to validate the complete transaction without changing sourc
 or review history. Use a new ID for a different transaction. If a request times
 out or disconnects, retry **the same ID and exact request**, rather than creating
 a second transaction. The last 100 results are retained for idempotent retries.
+
+## Comment operations
+
+Check that `.review/api.json` lists `comment` in `capabilities`; if it does not,
+update the extension and reload its window. Read the source immediately before
+an operation and use its `reviewRevision` and the thread's `review` and `id`.
+
+```json
+{
+  "id": "unique-comment-request-001",
+  "file": "chapters/introduction.tex",
+  "review": "review-name",
+  "thread": "t_example",
+  "reviewRevision": "reviewRevision returned by read",
+  "action": "reply",
+  "body": "Revised the definition."
+}
+```
+
+Each request performs one explicit action:
+
+| `action` | Additional fields | Result |
+| --- | --- | --- |
+| `reply` | `body` | Append a reply as `agent`. |
+| `set_tags` | `tags`, e.g. `["action", "question"]` | Replace the thread's tags. |
+| `resolve` | None | Mark the thread resolved. |
+| `reopen` | None | Mark the thread open. |
+
+The supported tags are `action`, `question`, `todo`, and `note`. An empty tags
+array resets the thread to `action`. Unknown tags, unknown fields, deleted
+threads, and stale revisions are rejected. Tags and resolved status are
+independent. Replying never resolves a thread. Resolution still requires the
+user's or project's authorization.
+
+Use `"dryRun": true` to validate without appending an event; omit it for the
+actual operation. Read again after each successful change before preparing the
+next request. On timeout, retry the same ID and exact request. The ID and request
+digest are stored with the event, so retries remain idempotent after a restart.
+IDs are scoped to the review. A different request must use a new ID.
+
+A comment operation appends one event and does not edit or save the source,
+change anchors, rewrite original quotes, or modify existing comments. It can
+run while the editor has unsaved source changes. UI/API writers are serialized
+by the extension; independent direct log writers do not participate in that
+serialization. Use this API instead of writing the log directly.
 
 ## Commit and recovery
 

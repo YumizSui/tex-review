@@ -107,7 +107,7 @@ export interface SetTagsEvent {
   op: 'set_tags'; thread: string; tags: CommentTag[]; ts: string;
 }
 
-export type ReviewEvent =
+export type ReviewEvent = (
   | SetTagsEvent
   | SetAnchorsEvent
   | AddThreadEvent
@@ -116,4 +116,4 @@ export type ReviewEvent =
   | ReopenEvent
   | EditCommentEvent
   | ThreadVisibilityEvent
-  | CommentVisibilityEvent;
+  | CommentVisibilityEvent) & { apiRequest?: { id: string; digest: string } };
