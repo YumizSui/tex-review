@@ -364,7 +364,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
               case 'reveal':
                 if (!pdfPath || !fs.existsSync(pdfPath)) throw new Error(vscode.l10n.t('Build or select a PDF first.'));
                 await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(pdfPath)); break;
-              case 'settings': await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:furui-local.tex-review'); break;
+              case 'settings': await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:yumizsui.tex-review'); break;
               default: post({ type: 'action', action: selected.action });
             }
           })().catch(e => post({ type: 'error', error: String(e.message ?? e) }));
@@ -471,7 +471,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
           return;
         }
         if (m.type === 'openSettings') {
-          await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:furui-local.tex-review'); return;
+          await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:yumizsui.tex-review'); return;
         }
         if (m.type === 'newReview') {
           const name = this.service.suggestReviewName(); this.service.createReview(name); review(); return;

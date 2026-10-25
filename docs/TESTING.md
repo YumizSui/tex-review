@@ -63,7 +63,11 @@ public documentation, and license notices. Exclude local agent instructions,
 Japanese Markdown companions, review stores, development history, personal
 paths, and working files.
 
-The packaging CLI is pinned to `@vscode/vsce` 3.9.2 with its Azure Identity
-dependency pinned to 4.13.0. Identity 4.13.1 switches to the MSAL Node 5.x line
-affected by GHSA-xcx6-jx8p-x3h5. Recheck `npm audit` before changing these pins.
+The packaging CLI is pinned to `@vscode/vsce` 3.9.2 with Azure Identity 4.13.0.
+Its MSAL Node 3.x dependency uses only `uuid.v4()`; a scoped override selects
+`uuid` 11.1.1, which preserves that CommonJS API and fixes
+[GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq).
+The Identity pin avoids the MSAL Node 5.x/6.x line affected by
+[GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5).
+Recheck `npm audit` and package creation before changing these overrides.
 These tools are development dependencies and are excluded from the VSIX.

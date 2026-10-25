@@ -5,6 +5,10 @@ anchored to the source text.
 
 ![TeX Review editor](docs/images/review-editor.png)
 
+## Install
+
+[Install from the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=yumizsui.tex-review).
+
 ## Features
 
 - TeX source, threaded comments, and PDF preview in a single editor.

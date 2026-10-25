@@ -2,7 +2,7 @@
   "name": "tex-review",
   "displayName": "TeX Review Studio",
   "description": "Anchored review comments and bidirectional SyncTeX PDF navigation in a local TeX editor.",
-  "version": "0.6.16",
+  "version": "0.6.17",
   "publisher": "yumizsui",
   "license": "MIT",
   "author": "Kairi Furui",
@@ -181,6 +181,9 @@
   "overrides": {
     "@vscode/vsce": {
       "@azure/identity": "4.13.0"
+    },
+    "@azure/msal-node": {
+      "uuid": "11.1.1"
     }
   },
   "repository": {
