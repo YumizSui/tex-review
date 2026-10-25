@@ -44,3 +44,15 @@ describe('scroll chaining within the comments pane', () => {
     time+=20;scroll(wheel(input,25));expect(card.scrollTop).toBe(20);expect(outer.scrollTop).toBe(20);
   });
 });
+
+it('contains a thread gesture at either boundary and lets reply fields chain only to their thread', () => {
+  const outer = {scrollTop:0}; let top=90, time=0;
+  const card = {get scrollTop(){return top;},set scrollTop(value:number){top=Math.max(0,Math.min(100,value));}};
+  const input = {get scrollTop(){return 0;},set scrollTop(_value:number){}};
+  const event=(target:any,deltaY:number)=>({target,deltaY,deltaX:0,deltaMode:0,ctrlKey:false,preventDefault:vi.fn()});
+  const scroll=commentScrollHandler(outer,(target:any)=>target,()=>20,()=>time,(owner:any)=>owner===input?card:owner);
+  scroll(event(input,30));expect(card.scrollTop).toBe(100);expect(outer.scrollTop).toBe(0);
+  time+=20;scroll(event(input,-30));expect(card.scrollTop).toBe(70);expect(outer.scrollTop).toBe(0);
+  time+=200;scroll(event(card,-200));expect(card.scrollTop).toBe(0);expect(outer.scrollTop).toBe(0);
+  time+=20;scroll(event(card,20));expect(card.scrollTop).toBe(20);expect(outer.scrollTop).toBe(0);
+});

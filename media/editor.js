@@ -330,7 +330,7 @@ function applyDocument(msg) {
   refreshDecorations();
 }
 function focusCard(id) {
-  if (restoringCommentFocus) return;
+  if (restoringCommentFocus || selectedThread === id) return;
   selectedThread = id;
   requestCommentAlignment();
   const thread = review.threads.find(thread => thread.id === id);
@@ -431,7 +431,7 @@ $('nextComment').addEventListener('click', () => navigateComment(1));
 function clearCards() { for (const c of cards.values()) c.element.remove(); cards.clear(); }
 function renderComments() {
   if (!editor) return;
-  const currentIds = new Set();
+  const currentIds = new Set(), restoreScroll = [], railScroll = $('cards').scrollTop;
   const focusedInput = document.activeElement instanceof HTMLTextAreaElement && $('cards').contains(document.activeElement) ? document.activeElement : null;
   const focusedSelection = focusedInput ? [focusedInput.selectionStart, focusedInput.selectionEnd] : null;
   let restoreInput = null;
@@ -442,7 +442,7 @@ function renderComments() {
     const loc = locate(thread);
     const signature = JSON.stringify([thread.status, thread.comments, loc.status, loc.outdated]);
     if (cards.get(thread.id)?.signature === signature) continue;
-    const old = cards.get(thread.id), scrollTop = old?.element.scrollTop || 0; const focus = document.activeElement?.dataset?.draft === key(thread.id);
+    const old = cards.get(thread.id), scrollTop = old?.element.scrollTop || 0, replySaved = old?.replySaved; const focus = document.activeElement?.dataset?.draft === key(thread.id);
     const selection = focus ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
     old?.element.remove();
     const card = make('article', undefined, 'card'); card.dataset.thread = thread.id;
@@ -492,21 +492,28 @@ function renderComments() {
     }
     const input = make('textarea'); input.rows = 2; input.placeholder = t('Reply…'); input.setAttribute('aria-label', t('Reply')); input.dataset.draft = key(thread.id); input.value = drafts[key(thread.id)] || '';
     input.addEventListener('input', () => { drafts[key(thread.id)] = input.value; saveState(); });
-    const submit = () => { if (input.value.trim()) send('reply', { thread: thread.id, body: input.value, review: review.active }); };
+    const submit = () => {
+      const entry = cards.get(thread.id);
+      if (!input.value.trim() || entry?.pendingReply) return;
+      entry.pendingReply = { body: input.value, focus: card.contains(document.activeElement) };
+      send('reply', { thread: thread.id, body: input.value, review: review.active });
+    };
     input.addEventListener('keydown', e => {
       if (e.isComposing || e.keyCode === 229) return;
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); input.value = ''; delete drafts[key(thread.id)]; saveState(); editor.focus(); }
       else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submit(); }
     });
-    card.append(input, button(t('Reply'), submit)); $('cards').append(card); cards.set(thread.id, { element: card, signature });
-    card.scrollTop = scrollTop;
-    if (focus) restoreInput = { input, selection };
+    card.append(input, button(t('Reply'), submit)); $('cards').append(card); cards.set(thread.id, { element: card, signature, pendingReply: old?.pendingReply });
+    restoreScroll.push({card, scrollTop, replySaved});
+    if (replySaved?.focus) restoreInput = { input, selection: [input.value.length, input.value.length] };
+    else if (focus) restoreInput = { input, selection };
   }
   for (const [id, c] of cards) if (id !== 'new' && !currentIds.has(id)) { c.element.remove(); cards.delete(id); }
   orderCommentCards();
   const restored = restoreInput || (focusedInput?.isConnected ? {input:focusedInput,selection:focusedSelection} : null);
   if (restored) { restoringCommentFocus = true; restored.input.focus({preventScroll:true}); restored.input.setSelectionRange(...restored.selection); restoringCommentFocus = false; }
-  if (pendingCommentScroll !== null) { $('cards').scrollTop = pendingCommentScroll; pendingCommentScroll = null; }
+  for (const {card, scrollTop, replySaved} of restoreScroll) card.scrollTop = replySaved ? card.scrollHeight : scrollTop;
+  $('cards').scrollTop = pendingCommentScroll ?? railScroll; pendingCommentScroll = null;
   refreshDecorations(); scheduleLayout();
 }
 function finishComment() {
@@ -621,11 +628,6 @@ const scrollComments = commentScrollHandler(
   (target, event) => {
     for (let element = target instanceof Element ? target : target?.parentElement; element && element !== $('cards'); element = element.parentElement) {
       if (element.scrollHeight > element.clientHeight + 1 && /^(auto|scroll)$/.test(getComputedStyle(element).overflowY)) {
-        if (element.classList.contains('card')) {
-          const bounds = element.getBoundingClientRect(), rail = $('cards').getBoundingClientRect();
-          if ((event.deltaY < 0 && (element.scrollTop <= 0 || bounds.top < rail.top)) ||
-              (event.deltaY > 0 && (element.scrollTop + element.clientHeight >= element.scrollHeight - 1 || bounds.bottom > rail.bottom))) return null;
-        }
         return element;
       }
     }
@@ -634,6 +636,8 @@ const scrollComments = commentScrollHandler(
   element => parseFloat(getComputedStyle(element).lineHeight) || editor.defaultLineHeight,
   undefined,
   owner => {
+    // A thread owns its boundaries. Only a reply textarea may chain to its thread.
+    if (owner.classList.contains('card')) return owner;
     for (let parent = owner.parentElement; parent && parent !== $('cards'); parent = parent.parentElement)
       if (parent.scrollHeight > parent.clientHeight + 1 && /^(auto|scroll)$/.test(getComputedStyle(parent).overflowY)) return parent;
     return $('cards');
@@ -741,11 +745,18 @@ window.addEventListener('message', event => timings.measure(`message.${event.dat
   else if (m.type === 'deleted') { $('deletionNotice').hidden = false; $('error').textContent = ''; }
   else if (m.type === 'deletionUndone') $('deletionNotice').hidden = true;
   else if (m.type === 'commentSaved') {
-    drafts[key(m.key)] = ''; commentPending = false;
+    const entry = cards.get(m.key), pending = entry?.pendingReply;
+    if (m.key === 'new' || (pending && drafts[key(m.key)] === pending.body)) drafts[key(m.key)] = '';
+    commentPending = false;
     if (m.key === 'new') { cards.get('new')?.element.remove(); cards.delete('new'); draftTarget = null; }
-    else { cards.get(m.key)?.element.remove(); cards.delete(m.key); }
+    else if (entry) {
+      // Keep the existing card until the updated review arrives, preserving its viewport.
+      entry.signature = null; entry.replySaved = pending && { ...pending, focus: pending.focus && entry.element.contains(document.activeElement) }; entry.pendingReply = null;
+      const input = entry.element.querySelector('textarea[data-draft]');
+      if (input) input.value = drafts[key(m.key)] || '';
+    }
     saveState(); $('error').textContent = ''; finishNavigation();
-  } else if (m.type === 'error') { pendingNavigation = null; navigationSent = false; pendingComment = null; commentPending = false; busyButton('buildPdf', false, 'Build PDF', 'Building PDF…'); busyButton('syncPdf', false, 'Sync PDF', 'Synchronizing PDF…'); $('error').textContent = m.error; }
+  } else if (m.type === 'error') { for (const entry of cards.values()) entry.pendingReply = null; pendingNavigation = null; navigationSent = false; pendingComment = null; commentPending = false; busyButton('buildPdf', false, 'Build PDF', 'Building PDF…'); busyButton('syncPdf', false, 'Sync PDF', 'Synchronizing PDF…'); $('error').textContent = m.error; }
   else if (m.type === 'building') { $('buildMode').disabled = $('roots').disabled = m.busy; busyButton('buildPdf', m.busy, 'Build PDF', 'Building PDF…'); if (m.busy) $('status').textContent = t('Building PDF…'); }
   else if (m.type === 'syncing') { if (m.request === syncRequest) busyButton('syncPdf', m.busy || !!pendingPdfJump, 'Sync PDF', 'Synchronizing PDF…'); }
   else if (m.type === 'built') { $('status').textContent = m.unchanged ? t('PDF is up to date') : m.mode === 'preview' ? t('Preview · {0}s', m.seconds) : t('Built · {0}s', m.seconds); $('status').title = m.mode === 'preview' ? t('References may need a full build') : ''; forward(); }
