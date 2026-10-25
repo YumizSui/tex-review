@@ -1,4 +1,4 @@
-# TeX Review
+# TeX Review Studio
 
 A VS Code / Cursor extension for LaTeX editing, PDF preview, and review comments
 anchored to the source text.

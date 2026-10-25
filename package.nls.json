@@ -3,7 +3,7 @@
   "command.addComment": "TeX Review: Add comment to selection",
   "config.markerSide": "Comment gutter in the review editor: left, right, or hidden.",
   "config.pdfPath": "Workspace-relative PDF path. Leave blank for automatic detection. Use the PDF beside its SyncTeX file.",
-  "editor.name": "TeX Review",
+  "editor.name": "TeX Review Studio",
   "config.engine": "TeX engine used for builds in the review editor.",
   "config.includePdfComments": "Export PDF comment annotations after building. The original PDF is preserved.",
   "config.pdfSync": "Source-to-PDF synchronization. Clicking the PDF to navigate to source works in both modes.",

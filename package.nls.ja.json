@@ -3,7 +3,7 @@
   "command.addComment": "TeX Review: 選択範囲にコメント",
   "config.markerSide": "本文のコメント目印の位置。left: 左の余白、right: 右の余白、none: 非表示。コメント追加は⌘⌥Mでも操作できます。",
   "config.pdfPath": "対応PDFのワークスペース内パス。空欄は自動検出。SyncTeXファイルと同じ出力先のPDFを指定してください。",
-  "editor.name": "TeX Review（コメント・PDF）",
+  "editor.name": "TeX Review Studio（コメント・PDF）",
   "config.engine": "レビューエディタのビルドに使うTeXエンジン。",
   "config.includePdfComments": "ビルド後にコメント注釈付きPDFも書き出します。元のPDFは保持されます。",
   "config.pdfSync": "本文からPDFへの同期方法。PDFのクリックによる本文への移動は両方で有効です。",

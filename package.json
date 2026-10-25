@@ -1,6 +1,6 @@
 {
   "name": "tex-review",
-  "displayName": "TeX Review",
+  "displayName": "TeX Review Studio",
   "description": "Anchored review comments and bidirectional SyncTeX PDF navigation in a local TeX editor.",
   "version": "0.6.15",
   "publisher": "yumizsui",
@@ -67,7 +67,7 @@
       ]
     },
     "configuration": {
-      "title": "TeX Review",
+      "title": "TeX Review Studio",
       "properties": {
         "texReview.markerSide": {
           "type": "string",
