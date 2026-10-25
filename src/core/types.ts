@@ -92,6 +92,7 @@ export interface CommentVisibilityEvent {
 }
 
 export interface SetAnchorsEvent {
+  transaction?: string;
   op: 'set_anchors';
   file: string;
   revision: string;

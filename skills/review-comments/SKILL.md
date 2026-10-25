@@ -10,6 +10,21 @@ the human-friendly **view**; make changes by **appending events** to the log.
 Never edit the `.view.json` (the extension owns it) and never rewrite the log —
 only append. This keeps you race-free with the live extension.
 
+## Source changes
+
+When changing a reviewed TeX passage, prefer the extension's
+[transaction API](../../docs/AI_EDITING.md). Discover the installed CLI in
+`.review/api.json`, read the current buffer and comments, and submit source edits
+and explicit destinations for every affected comment as one transaction. Validate
+with `dryRun` first. Do not edit TeX and subsequently guess comment line numbers,
+or rewrite `.view.json` and anchor checkpoints. A stale revision or missing
+comment mapping must be resolved before applying any change. The API preserves
+original quotes and never resolves threads.
+
+If the API is unavailable, tell the user that transactional editing is unavailable;
+do not silently claim that direct file changes have the same guarantees. Direct
+editing is still supported, but comment correspondence must be checked afterwards.
+
 ## Prerequisite
 
 `jq` must be installed (`jq --version`). If missing, tell the user.

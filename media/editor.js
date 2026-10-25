@@ -43,6 +43,7 @@ const nativeDecorations = StateField.define({
   },
   provide: field => EditorView.decorations.from(field),
 });
+const transactionConfig = new Compartment();
 const appearanceConfig = new Compartment();
 const comparisonConfig = new Compartment();
 const markerConfig = new Compartment(), highlights = StateEffect.define();
@@ -227,7 +228,7 @@ function initialize(msg) {
       keymap.of([{ key: 'Mod-Alt-m', run: () => { compose(); return true; } },
         { key: 'Mod-s', run: () => { requestSave(); return true; } },
         { key: 'Escape', run: () => { if (!cards.has('new')) return false; cancelCompose(); return true; } }, ...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
-      appearanceConfig.of(drawSelection()), comparisonConfig.of([]), nativeDecorations, decorations, markerConfig.of(markerExtension(config.markerSide)),
+      transactionConfig.of(EditorState.readOnly.of(!!msg.transactionPending)), appearanceConfig.of(drawSelection()), comparisonConfig.of([]), nativeDecorations, decorations, markerConfig.of(markerExtension(config.markerSide)),
       EditorView.updateListener.of(update => {
         if (update.docChanged) for (const [id, tracked] of liveAnchors) liveAnchors.set(id, mapAnchor(tracked, update.changes));
         if (update.docChanged && draftTarget) {
@@ -248,7 +249,7 @@ function initialize(msg) {
     let state = cached.state;
     if (state.doc.toString() !== msg.text) state = state.update({ changes: sourceChanges(state.doc, sourceText(msg.text)), annotations: Transaction.addToHistory.of(false) }).state;
     editor.setState(state);
-    editor.dispatch({ effects: [nativeTokens.of(Decoration.none), comparisonConfig.reconfigure([])] });
+    editor.dispatch({ effects: [nativeTokens.of(Decoration.none), transactionConfig.reconfigure(EditorState.readOnly.of(!!msg.transactionPending)), comparisonConfig.reconfigure([])] });
   }
   if (msg.selection) {
     const line = Number.isFinite(msg.selection.line) ? editor.state.doc.line(Math.max(1, Math.min(editor.state.doc.lines, msg.selection.line))) : null;
@@ -667,6 +668,7 @@ window.addEventListener('message', event => timings.measure(`message.${event.dat
     editor.dispatch({ selection: { anchor: Math.min(length, m.from), head: Math.min(length, m.to) }, effects: EditorView.scrollIntoView(Math.min(length, m.from), { y: 'center' }) });
     if (m.compose) compose(); else editor.focus();
   }
+  else if (m.type === 'transaction') { editor.dispatch({effects:transactionConfig.reconfigure(EditorState.readOnly.of(!!m.busy))}); $('status').textContent = m.busy ? t('AI edit pending') : t('Changes applied'); }
   else if (m.type === 'syntax') {
     if (m.version !== version || inflight || editor.state.doc.toString() !== confirmed) return;
     const marks = m.ranges.filter(([from, to]) => to > from && to <= editor.state.doc.length).map(([from, to, color, font]) => {

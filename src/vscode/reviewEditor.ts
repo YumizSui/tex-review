@@ -160,7 +160,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
     };
     const postSource = (kind = 'source', selection?: object, thread?: string) => {
       post({ type: kind, text: normalizedText().toString(), version: document.version, file,
-        selection, thread, config: config(),
+        selection, thread, transactionPending: this.service.transactionPending, config: config(),
         worker: panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'pdf.worker.mjs')).toString() });
     };
     const switchSource = async (nextFile: string, selection?: object, thread?: string) => {
@@ -255,6 +255,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
         tabSize: editor.get('tabSize', 4) };
     };
     const review = () => {
+      if (this.service.transactionPending) return;
       const started = performance.now();
       const message = { type: 'review', active: this.service.active(), reviews: this.service.list(),
         threads: this.service.active() ? this.service.refreshView()?.threads : [], files: sourceScope().files, file, version: document.version, config: config() };
@@ -262,14 +263,18 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
       if (signature !== lastReview) { lastReview = signature; post(message); }
       this.recordPerformance({ phase: 'comments.refresh', milliseconds: performance.now() - started });
     };
-    const docState = (kind = 'document') => post({ type: kind, text: normalizedText().toString(), version: document.version });
+    const docState = (kind = 'document') => !this.service.transactionPending && post({ type: kind, text: normalizedText().toString(), version: document.version });
     const pdfState = () => post({ type: 'pdf', uri: pdfPath ? panel.webview.asWebviewUri(vscode.Uri.file(pdfPath)).toString() + '?v=' + fs.statSync(pdfPath).mtimeMs : null,
       name: pdfPath ? path.relative(root, pdfPath) : null, roots: projectTargets(root).map(t => t.root), selectedRoot: this.selectedRoot });
     disposables.push(this.targetChanged.event(() => { pdfPath = this.findPdf(document); pdfState(); review(); updateTitle(); }));
     panel.webview.options = { enableScripts: true, localResourceRoots: [this.folder.uri, vscode.Uri.joinPath(this.context.extensionUri, 'media')] };
     panel.webview.html = this.html(panel.webview);
+    disposables.push(this.service.onTransactionChanged(() => {
+      post({type:'transaction',busy:this.service.transactionPending});
+      if (!this.service.transactionPending && ready) { docState(); review(); scheduleSyntax(); }
+    }));
     const onChange = vscode.workspace.onDidChangeTextDocument(e => {
-      if (e.document.uri.toString() === document.uri.toString()) { rememberDocument(); updateTitle(); if (ready && panel.visible) { if (!applying) { docState(); review(); } scheduleSyntax(); } }
+      if (e.document.uri.toString() === document.uri.toString()) { rememberDocument(); updateTitle(); if (ready && panel.visible && !this.service.transactionPending) { if (!applying) { docState(); review(); } scheduleSyntax(); } }
     });
     disposables.push(onChange);
     // An exact, non-recursive watch is not subject to recursive watcher exclusions.
@@ -399,6 +404,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
         }
         if (m.file && m.file !== file && !['navigate', 'ready', 'theme'].includes(m.type)) return;
         if (m.type === 'navigate') {
+          if (this.service.transactionPending) throw new Error('A source transaction is in progress.');
           if (typeof m.target !== 'string') return;
           const allowed = sourceScope().files.includes(m.target) || m.target === this.sessionSource;
           if (!allowed && !m.explicit) throw new Error('Source is outside the selected manuscript.');
@@ -425,6 +431,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
             const items: Action[] = [
               item('switch', vscode.l10n.t('Open review…'), 'comment-discussion'),
               item('new', vscode.l10n.t('New review…'), 'add'),
+              ...(this.service.transactionPending ? [item('recoverTransaction', vscode.l10n.t('Recover AI edit'), 'sync')] : []),
               { label: '', kind: vscode.QuickPickItemKind.Separator },
               item('git', vscode.l10n.t('Compare with checkpoint…'), 'git-commit'),
               item('file', vscode.l10n.t('Compare with TeX file…'), 'diff'),
@@ -449,6 +456,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
                 const name = await vscode.window.showQuickPick(this.service.list(), { title: vscode.l10n.t('Open review…') });
                 if (name && !disposed) { this.service.setActive(name); review(); } break;
               }
+              case 'recoverTransaction': await vscode.commands.executeCommand('texReview.recoverTransaction'); break;
               case 'new': this.service.createReview(this.service.suggestReviewName()); review(); break;
               case 'git': case 'file': await chooseBaseline(selected.action); break;
               case 'fullBuild': post({ type: 'action', action: 'fullBuild' }); break;
@@ -480,6 +488,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
           post({ type: 'deletionUndone' }); review(); return;
         }
         if (m.type === 'edit') {
+          if (this.service.transactionPending) throw new Error('A source transaction is in progress.');
           if (m.version !== document.version) { docState('conflict'); return; }
           const changes = ChangeSet.fromJSON(m.changes);
           if (changes.length !== normalizedText().length) throw new Error('Invalid edit revision');

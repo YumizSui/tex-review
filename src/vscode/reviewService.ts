@@ -14,6 +14,19 @@ export function nowIso(): string {
 
 export class ReviewService {
   private readonly anchors: AnchorStore;
+  transactionPending = false;
+  private readonly transactionListeners = new Set<() => void>();
+  onTransactionChanged(listener: () => void) { this.transactionListeners.add(listener); return { dispose: () => { this.transactionListeners.delete(listener); } }; }
+  beginTransaction() {
+    if (this.transactionPending) throw new Error('A source transaction is pending recovery.');
+    this.transactionPending = true;
+    for (const listener of this.transactionListeners) listener();
+  }
+  endTransaction() {
+    this.transactionPending = false;
+    try { this.refreshAll(); }
+    finally { for (const listener of this.transactionListeners) listener(); }
+  }
   constructor(private readonly dir: string) { this.anchors = new AnchorStore(dir); }
 
   updateDocument(file: string, text: string, changes?: ChangeSet, dirty = false): void {
@@ -23,6 +36,7 @@ export class ReviewService {
   }
 
   refreshAll(): void {
+    if (this.transactionPending) return;
     for (const name of this.list()) storage.writeView(this.dir, name, this.view(name));
   }
 
@@ -32,6 +46,7 @@ export class ReviewService {
   }
 
   checkpoint(file: string): void {
+    if (this.transactionPending) return;
     for (const name of this.list()) this.view(name);
     this.anchors.checkpoint(file);
   }
@@ -132,6 +147,7 @@ export class ReviewService {
   // Recompute and persist the active review's view. Safe to call on every
   // render — used to keep view.json current after external (agent) log writes.
   refreshView(): ReviewView | null {
+    if (this.transactionPending) return null;
     const name = this.active();
     if (!name) return null;
     const v = this.view(name);
@@ -143,6 +159,7 @@ export class ReviewService {
   // its view, return it. Pass `target` to act on a non-active review, e.g. from
   // the tree panel context menu.
   apply(event: ReviewEvent, target?: string): ReviewView {
+    if (this.transactionPending && !(event.op === 'set_anchors' && event.transaction)) throw new Error('A source transaction is in progress.');
     const name = target ?? this.active();
     if (!name) throw new Error('No active review. Create one first.');
     if (event.op === 'add_thread' && !event.anchor) event = { ...event, anchor: this.anchors.capture(event.file, event.range) };
@@ -156,7 +173,7 @@ export class ReviewService {
     }
     storage.appendEvent(this.dir, name, event);
     const v = this.view(name);
-    storage.writeView(this.dir, name, v);
+    if (!this.transactionPending) storage.writeView(this.dir, name, v);
     return v;
   }
 }

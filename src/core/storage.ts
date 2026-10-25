@@ -32,7 +32,15 @@ export function ensureLog(dir: string, name: string): void {
 
 export function appendEvent(dir: string, name: string, event: ReviewEvent): void {
   fs.mkdirSync(dir, { recursive: true });
-  fs.appendFileSync(logPath(dir, name), JSON.stringify(event) + '\n');
+  const fd = fs.openSync(logPath(dir, name), 'a+');
+  try {
+    const size = fs.fstatSync(fd).size, last = Buffer.alloc(1);
+    if (size) fs.readSync(fd, last, 0, 1, size - 1);
+    // A process may have stopped in the middle of a record. Keep that history,
+    // terminate its incomplete line, and append the new event as one write.
+    const record = (size && last[0] !== 10 ? '\n' : '') + JSON.stringify(event) + '\n';
+    if (fs.writeSync(fd, record) !== Buffer.byteLength(record)) throw new Error('Incomplete review log append.');
+  } finally { fs.closeSync(fd); }
 }
 
 export function readLog(dir: string, name: string): ReviewEvent[] {

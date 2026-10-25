@@ -7,6 +7,8 @@
 !package.nls.json
 !package.nls.ja.json
 !dist/extension.js
+!bin/tex-review.mjs
+!docs/AI_EDITING.md
 !media/comment.svg
 !media/icon.png
 !media/editor.bundle.js

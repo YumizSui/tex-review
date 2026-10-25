@@ -44,8 +44,9 @@ required for comparisons against a commit.
 Open a `.tex` file with **TeX Review: Open review editor**. Select a passage and
 press **⌘⌥M** (macOS) or **Ctrl+Alt+M** (Windows/Linux) to add a comment.
 
-AI assistants can read comments and append replies through the
-[review-file guide](skills/review-comments/SKILL.md).
+AI assistants can change reviewed text and its comment destinations together
+through the [local editing API](docs/AI_EDITING.md), or read and answer comments
+through the [review-file guide](skills/review-comments/SKILL.md).
 
 ## Limitations
 

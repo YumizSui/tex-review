@@ -1,4 +1,5 @@
 const ja = {
+  "AI edit pending": "AIによる変更の処理待ち",
   "File": "ファイル", "Manuscript": "原稿全体", "Source file": "本文ファイル",
   "No comments in this manuscript.": "この原稿にコメントはありません。",
   "Resolve unsaved changes before switching files.": "ファイルを切り替える前に未反映の変更を確認してください。",
