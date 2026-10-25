@@ -224,3 +224,12 @@ body.vscode-high-contrast, body.vscode-high-contrast-light { --tex-command: var(
 .overview-comment.active { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); box-shadow: inset 3px 0 var(--vscode-focusBorder); }
 .overview-comment.active small { color: inherit; }
 .overview-empty { padding: 10px; color: var(--vscode-descriptionForeground); }
+
+/* Give controls their own row; cards cannot paint or receive input above it. */
+#comments { display: flex; flex-direction: column; }
+#commentHeader { flex: none; height: auto; min-height: 34px; padding: 6px 10px; flex-wrap: wrap; row-gap: 4px; }
+.comment-scope { flex-shrink: 0; }
+.scope-button { white-space: nowrap; }
+#commentBody { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+#cards { overflow: hidden; }
+#commentOverview { top: 0; }

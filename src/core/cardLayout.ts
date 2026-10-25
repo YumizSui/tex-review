@@ -51,3 +51,16 @@ export function layoutViewportCards(cards: CardMeasure[], focusedId: string | nu
   }
   return tops;
 }
+
+/** The source has no comments toolbar. Keep an anchor in that inset readable,
+ * while allowing earlier comments to scroll away continuously above the source. */
+export function commentViewportAnchor(sourceTop: number, sourceViewportTop: number, commentViewportTop: number): number {
+  const y = sourceTop - sourceViewportTop;
+  return y < 0 ? y : Math.max(0, y - Math.max(0, commentViewportTop - sourceViewportTop));
+}
+
+/** Extra comment-only travel exposes cards packed before a focused first-page
+ * thread, even when the source itself has already reached scrollTop = 0. */
+export function commentRailPosition(value: number, minimumTop: number): { sourceScrollTop: number; offset: number } {
+  return { sourceScrollTop: Math.max(0, value), offset: Math.min(Math.max(0, -value), Math.max(0, -minimumTop)) };
+}

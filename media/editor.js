@@ -16,7 +16,7 @@ import * as pdfjs from 'pdfjs-dist';
 import { anchor } from '../src/core/anchor';
 import { commentHighlights } from '../src/core/commentHighlights';
 import { projectComments } from '../src/core/projectComments';
-import { commentBottomPadding, layoutViewportCards } from '../src/core/cardLayout';
+import { commentBottomPadding, commentRailPosition, commentViewportAnchor, layoutViewportCards } from '../src/core/cardLayout';
 
 const api = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
@@ -34,6 +34,7 @@ const liveAnchors = new Map();
 let syncRequest = 0, requestedBuildMode;
 let flushTimer, syncTimer, commentPending = false, composing = false, saveRequested = false, pendingCompose = false, buildRequested = null;
 const layoutMeasureKey = {};
+let commentOffset = 0, commentMinimumTop = 0;
 const nativeTokens = StateEffect.define();
 const nativeDecorations = StateField.define({
   create: () => Decoration.none,
@@ -107,6 +108,7 @@ function measureLayout() {
   if (!$('showComments').checked) return null;
   const area = $('cards').getBoundingClientRect(), height = $('cards').clientHeight;
   const documentTop = editor.documentTop;
+  const sourceTop = $('source').getBoundingClientRect().top;
   const threads = new Map(review.threads.map(thread => [thread.id, thread]));
   const measured = [];
   for (const [id, entry] of cards) {
@@ -115,13 +117,14 @@ function measureLayout() {
     if (!target) continue;
     const from = Math.max(0, Math.min(editor.state.doc.length, target.from));
     const rect = from >= editor.viewport.from && from <= editor.viewport.to ? editor.coordsAtPos(from) : null;
-    const anchorTop = rect ? rect.top - area.top : documentTop + editor.lineBlockAt(from).top - area.top;
-    measured.push({ ...entry, id, anchor: anchorTop, height: entry.element.getBoundingClientRect().height, label: thread ? threadLabel(thread, target) : null, order: measured.length });
+    const actualTop = rect ? rect.top : documentTop + editor.lineBlockAt(from).top;
+    const anchorTop = commentViewportAnchor(actualTop, sourceTop, area.top);
+    measured.push({ ...entry, id, rawAnchor: actualTop - area.top, anchor: anchorTop, height: entry.element.getBoundingClientRect().height, label: thread ? threadLabel(thread, target) : null, order: measured.length });
   }
-  measured.sort((a, b) => a.anchor - b.anchor || (a.id === selectedThread ? 0 : 1) - (b.id === selectedThread ? 0 : 1) || a.order - b.order);
+  measured.sort((a, b) => a.rawAnchor - b.rawAnchor || (a.id === selectedThread ? 0 : 1) - (b.id === selectedThread ? 0 : 1) || a.order - b.order);
   const sourceBottom = documentTop + editor.lineBlockAt(editor.state.doc.length).bottom - area.top;
   return { measured, height, tops: layoutViewportCards(measured, selectedThread, height),
-    bottomPadding: commentBottomPadding(measured, sourceBottom) };
+    bottomPadding: commentBottomPadding(measured.map(card => ({ ...card, anchor: card.rawAnchor })), sourceBottom, 10, 12 + Math.max(0, area.top - sourceTop)) };
 }
 function applyLayout(result) {
   const padding = result?.bottomPadding || 0;
@@ -131,8 +134,10 @@ function applyLayout(result) {
   }
   if (!result) return;
   const { measured, height, tops } = result;
+  commentMinimumTop = Math.min(0, ...tops);
+  commentOffset = Math.min(commentOffset, -commentMinimumTop);
   measured.forEach((card, i) => {
-    const top = tops[i];
+    const top = tops[i] + commentOffset;
     if (card.label !== null) { const label = card.element.querySelector('.card-heading > button'); if (label && label.textContent !== card.label) label.textContent = card.label; }
     card.element.style.visibility = top + card.height < 0 || top > height ? 'hidden' : 'visible';
     card.element.style.top = `${top}px`;
@@ -213,6 +218,7 @@ function initialize(msg) {
     clearCards(); editor.destroy(); liveAnchors.clear();
   }
   const cached = sourceStates.get(msg.file);
+  commentOffset = 0; commentMinimumTop = 0;
   clearTimeout(flushTimer); clearTimeout(syncTimer);
   pendingReview = null; pendingChanges = ChangeSet.empty(msg.text.length); inflight = null;
   draftTarget = null; pendingComment = null; commentPending = false; selectedThread = msg.thread || cached?.selectedThread || null;
@@ -265,7 +271,7 @@ function initialize(msg) {
     editor.dispatch({ selection: { anchor: target.from, head: target.to } });
     compose(); draftTarget = target; updateComposer();
   }
-  editor.scrollDOM.addEventListener('scroll', () => { scheduleLayout(); saveState(); }, { passive: true });
+  editor.scrollDOM.addEventListener('scroll', () => { if (editor.scrollDOM.scrollTop > 0) commentOffset = 0; scheduleLayout(); saveState(); }, { passive: true });
   applyAppearance();
   if (cached && !msg.selection && !msg.thread) editor.scrollDOM.scrollTop = cached.scrollTop;
   else if (!cached && previous.file === msg.file && previous.scrollTop && !msg.selection) editor.scrollDOM.scrollTop = previous.scrollTop;
@@ -312,7 +318,7 @@ function applyDocument(msg) {
 }
 function focusCard(id) {
   if (selectedThread === id) return;
-  selectedThread = id;
+  selectedThread = id; commentOffset = 0;
   const thread = review.threads.find(thread => thread.id === id);
   if (thread) {
     const loc = locate(thread), rect = editor.coordsAtPos(loc.from), area = $('cards').getBoundingClientRect();
@@ -590,12 +596,18 @@ $('refreshBaseline').addEventListener('click', () => send('refreshBaseline'));
 $('undoDelete').addEventListener('click', () => send('undoDelete'));
 $('dismissDelete').addEventListener('click', () => { $('deletionNotice').hidden = true; });
 const scrollComments = commentScrollHandler(
-  { get scrollTop() { return editor?.scrollDOM.scrollTop || 0; }, set scrollTop(value) { if (editor) editor.scrollDOM.scrollTop = value; },
+  { get scrollTop() { return (editor?.scrollDOM.scrollTop || 0) - commentOffset; }, set scrollTop(value) {
+      if (!editor) return;
+      const position = commentRailPosition(value, commentMinimumTop);
+      commentOffset = position.offset; editor.scrollDOM.scrollTop = position.sourceScrollTop; scheduleLayout();
+    },
     get clientHeight() { return editor?.scrollDOM.clientHeight || 0; } },
   (target, event) => {
     for (let element = target instanceof Element ? target : target?.parentElement; element && element !== $('comments'); element = element.parentElement) {
       if (element.scrollHeight > element.clientHeight + 1 && /^(auto|scroll)$/.test(getComputedStyle(element).overflowY)) {
         if (element.classList.contains('card')) {
+          if (event.deltaY < 0 && element.scrollTop <= 0 && (commentOffset > 0 || editor.scrollDOM.scrollTop === 0 && commentMinimumTop < 0)) return null;
+          if (event.deltaY > 0 && commentOffset > 0 && element.scrollTop + element.clientHeight >= element.scrollHeight - 1) return null;
           const bounds = element.getBoundingClientRect(), rail = $('cards').getBoundingClientRect();
           // A clipped card cannot reveal its footer by scrolling internally.
           // Move its source anchor into view first, preserving gesture ownership.

@@ -1,5 +1,5 @@
 import { describe,it,expect } from 'vitest';
-import { commentBottomPadding, layoutCards, layoutViewportCards } from '../../src/core/cardLayout';
+import { commentRailPosition, commentViewportAnchor, commentBottomPadding, layoutCards, layoutViewportCards } from '../../src/core/cardLayout';
 describe('focused comment alignment', () => {
   const cards=[{id:'a',anchor:90,height:150},{id:'b',anchor:110,height:100},{id:'c',anchor:130,height:80}];
   it('pins a focused middle card and moves neighbors in both directions',()=>{
@@ -79,5 +79,30 @@ describe('end-of-source comment scroll range', () => {
   it('removes extra space when comments are hidden or finish before the source', () => {
     expect(commentBottomPadding([],300)).toBe(0);
     expect(commentBottomPadding([{id:'early',anchor:30,height:100}],300)).toBe(0);
+  });
+});
+
+describe('comment toolbar boundary', () => {
+  it('keeps a first-line card below the toolbar while preserving lower source alignment', () => {
+    expect(commentViewportAnchor(112, 100, 134)).toBe(0);
+    expect(commentViewportAnchor(134, 100, 134)).toBe(0);
+    expect(commentViewportAnchor(180, 100, 134)).toBe(46);
+  });
+  it('lets offscreen anchors leave continuously without pinning old cards over controls', () => {
+    expect(commentViewportAnchor(99, 100, 134)).toBe(-1);
+    expect(commentViewportAnchor(100, 100, 134)).toBe(0);
+    expect(commentViewportAnchor(-100, 100, 134)).toBe(-200);
+  });
+});
+
+describe('comment-only travel before the source boundary', () => {
+  it('allows earlier packed comments to be reached when the source is already at its top', () => {
+    expect(commentRailPosition(-100, -600)).toEqual({ sourceScrollTop: 0, offset: 100 });
+    expect(commentRailPosition(-900, -600)).toEqual({ sourceScrollTop: 0, offset: 600 });
+  });
+  it('returns smoothly to normal source scrolling and does not invent travel without preceding cards', () => {
+    expect(commentRailPosition(-20, -600)).toEqual({ sourceScrollTop: 0, offset: 20 });
+    expect(commentRailPosition(40, -600)).toEqual({ sourceScrollTop: 40, offset: 0 });
+    expect(commentRailPosition(-100, 0)).toEqual({ sourceScrollTop: 0, offset: 0 });
   });
 });
