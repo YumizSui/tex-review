@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">TeX Review</title>
+  <rect x="12" y="12" width="232" height="232" rx="48" fill="#172C3A"/>
+  <path d="M65 57H191A20 20 0 0 1 211 77V153A20 20 0 0 1 191 173H110L65 204V173A20 20 0 0 1 45 153V77A20 20 0 0 1 65 57Z" fill="none" stroke="#74D6BC" stroke-width="9" stroke-linejoin="round"/>
+  <g fill="#F4F7F8">
+    <!-- T -->
+    <path d="M63 84H105V96H101L99 90H90V126L96 128V132H72V128L78 126V90H69L67 96H63Z"/>
+    <!-- Lowered E follows the TeX wordmark's baseline rhythm. -->
+    <path d="M106 100H143V112H139L137 106H121V119H131L133 114H137V130H133L131 125H121V140H138L141 133H145L143 146H106V142L111 140V106L106 104Z"/>
+    <!-- X -->
+    <path d="M145 84H166V88L161 90L170 102L179 90L174 88V84H194V88L187 91L175 108L188 126L195 128V132H172V128L177 126L167 113L158 126L163 128V132H143V128L150 125L162 107L150 90L145 88Z"/>
+  </g>
+</svg>

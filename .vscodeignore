@@ -8,6 +8,7 @@
 !package.nls.ja.json
 !dist/extension.js
 !media/comment.svg
+!media/icon.png
 !media/editor.bundle.js
 !media/editor.css
 !media/onig.wasm

@@ -3,7 +3,7 @@
   "displayName": "TeX Review",
   "description": "Anchored review comments and bidirectional SyncTeX PDF navigation in a local TeX editor.",
   "version": "0.6.15",
-  "publisher": "furui-local",
+  "publisher": "yumizsui",
   "license": "MIT",
   "author": "Kairi Furui",
   "keywords": [
@@ -12,7 +12,10 @@
     "comments",
     "ai",
     "agent",
-    "local"
+    "local",
+    "latex",
+    "tex",
+    "pdf"
   ],
   "engines": {
     "vscode": "^1.90.0",
@@ -187,5 +190,10 @@
   "homepage": "https://github.com/YumizSui/tex-review#readme",
   "bugs": {
     "url": "https://github.com/YumizSui/tex-review/issues"
+  },
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#172C3A",
+    "theme": "dark"
   }
 }
