@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { ChangeSet } from '@codemirror/state';
 import { ReviewService } from '../../src/vscode/reviewService';
 import { sourceText } from '../../src/core/commentAnchors';
-import { checkpointPath, readCheckpoints } from '../../src/core/sourceCheckpoints';
+import { checkpointPath, readCheckpoints, writeCheckpoint } from '../../src/core/sourceCheckpoints';
 import { writeSnapshot } from '../../src/core/sourceSnapshots';
 import { readLog, appendEvent } from '../../src/core/storage';
 let root: string, dir: string, service: ReviewService;
@@ -205,4 +205,33 @@ it('retains exact mappings from another host when its source update arrives late
   other.updateDocument(file, after, undefined, false); other.checkpoint(file);
   service.syncDisk(file);
   expect(thread().anchor?.status).toBe('attached'); expect(thread().range.endColumn).toBe(8);
+});
+
+
+describe('explicit destinations take precedence over derived mappings', () => {
+  it('does not remap an API destination through a delayed full-document reload in another host', () => {
+    add(); const observer = new ReviewService(dir); observer.view('review');
+    const before = 'head\ntarget\nend', after = 'head\nrewritten passage\nend';
+    service.updateDocument(file, after, undefined, false);
+    service.reattach('t1', {startLine:2,startColumn:1,endLine:2,endColumn:18}, 'review');
+    write(after);
+    // The observer sees the explicit destination before VS Code reloads its native buffer.
+    observer.view('review');
+    observer.updateDocument(file, after, ChangeSet.of({from:0,to:before.length,insert:after},before.length),false);
+    observer.checkpoint(file);
+    expect(observer.view('review').threads[0].anchor).toMatchObject({from:5,to:22,status:'attached'});
+    service = new ReviewService(dir); expect(thread().anchor).toMatchObject({from:5,to:22,status:'attached'});
+  });
+  it('repairs a conflicting same-revision checkpoint on restart and in an already open host', () => {
+    add(); service.reattach('t1',{startLine:1,startColumn:1,endLine:1,endColumn:5},'review');
+    const originalLog = fs.readFileSync(path.join(dir,'review.log.jsonl'),'utf8');
+    const checkpoint = readCheckpoints(dir,file)[0], bad = structuredClone(checkpoint);
+    bad.entries[JSON.stringify(['review','t1'])].position={from:12,to:12,status:'deleted'};
+    writeCheckpoint(dir,bad,checkpoint);
+    expect(thread().anchor).toMatchObject({from:0,to:4,status:'attached'});
+    service = new ReviewService(dir); service.initializeAnchors();
+    expect(thread().anchor).toMatchObject({from:0,to:4,status:'attached'});
+    expect(readCheckpoints(dir,file)[0].entries[JSON.stringify(['review','t1'])].position).toEqual({from:0,to:4,status:'attached'});
+    expect(fs.readFileSync(path.join(dir,'review.log.jsonl'),'utf8')).toBe(originalLog);
+  });
 });

@@ -110,6 +110,14 @@ export class AnchorStore {
         }
         this.remember(source);
       }
+      // An explicit destination names exact offsets in an exact source revision.
+      // A delayed native reload or a derived checkpoint must not remap that destination
+      // a second time. This also repairs checkpoints written by an older host.
+      const explicit = thread.anchor;
+      if (source.available && explicit?.revision === source.revision && explicit.from >= 0 && explicit.to >= explicit.from && explicit.to <= source.text.length) {
+        entry.position = {from:explicit.from,to:explicit.to,status:explicit.status};
+        source.history.get(source.revision)?.set(id, {...entry.position});
+      }
       return { ...thread, range: source.available ? lineRange(source.text, entry.position) : thread.range,
         anchor: { ...entry.position, revision: source.revision }, sourceDirty: source.dirty };
     }) };
