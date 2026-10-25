@@ -64,3 +64,10 @@ export function commentViewportAnchor(sourceTop: number, sourceViewportTop: numb
 export function commentRailPosition(value: number, minimumTop: number): { sourceScrollTop: number; offset: number } {
   return { sourceScrollTop: Math.max(0, value), offset: Math.min(Math.max(0, -value), Math.max(0, -minimumTop)) };
 }
+
+/** Compute one explicit alignment; manual scrolling never calls this helper. */
+export function alignCommentCard(cardTop: number, sourceY: number, viewportHeight: number): { paddingTop: number; scrollTop: number } {
+  const target = Math.max(10, Math.min(Math.max(10, viewportHeight - 30), sourceY));
+  const paddingTop = Math.max(10, target - cardTop);
+  return { paddingTop, scrollTop: Math.max(0, cardTop + paddingTop - target) };
+}

@@ -1,3 +1,4 @@
+import { alignCommentCard } from '../../src/core/cardLayout';
 import { describe,it,expect } from 'vitest';
 import { commentRailPosition, commentViewportAnchor, commentBottomPadding, layoutCards, layoutViewportCards } from '../../src/core/cardLayout';
 describe('focused comment alignment', () => {
@@ -104,5 +105,20 @@ describe('comment-only travel before the source boundary', () => {
     expect(commentRailPosition(-20, -600)).toEqual({ sourceScrollTop: 0, offset: 20 });
     expect(commentRailPosition(40, -600)).toEqual({ sourceScrollTop: 40, offset: 0 });
     expect(commentRailPosition(-100, 0)).toEqual({ sourceScrollTop: 0, offset: 0 });
+  });
+});
+
+describe('explicit comment alignment', () => {
+  it('aligns a first card by adding leading space without negative scrolling', () => {
+    expect(alignCommentCard(0, 200, 600)).toEqual({paddingTop:200,scrollTop:0});
+  });
+  it('aligns a later card by scrolling the list while keeping its natural spacing', () => {
+    const result=alignCommentCard(1000,200,600);
+    expect(1000+result.paddingTop-result.scrollTop).toBe(200);
+  });
+  it('keeps the selected heading clear of the toolbar and viewport bottom', () => {
+    expect(alignCommentCard(0,-50,600)).toEqual({paddingTop:10,scrollTop:0});
+    const result=alignCommentCard(1000,800,600);
+    expect(1000+result.paddingTop-result.scrollTop).toBe(570);
   });
 });

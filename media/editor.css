@@ -233,3 +233,8 @@ body.vscode-high-contrast, body.vscode-high-contrast-light { --tex-command: var(
 #commentBody { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 #cards { overflow: hidden; }
 #commentOverview { top: 0; }
+
+/* Manual reading uses a normal scrollable list. Align only on explicit selection. */
+#commentBody { overflow: clip; }
+#cards { display: flex; flex-direction: column; gap: 10px; padding: 10px; overflow: auto; overscroll-behavior: contain; overflow-anchor: none; pointer-events: auto; }
+#cards .card { position: relative; top: auto; left: auto; right: auto; flex: none; }
