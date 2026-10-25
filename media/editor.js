@@ -27,6 +27,7 @@ let drafts = previous.drafts || {}, cards = new Map(), selectedThread = null, ac
 let openNativeRequested = false, pendingNavigation = null, navigationSent = false, pendingThread = null;
 const sourceStates = new Map();
 let overview = previous.overview || false;
+const closedOverviewFiles = new Set(previous.closedOverviewFiles || []);
 const savedComposers = previous.composers || {};
 let pendingChanges = ChangeSet.empty(0), pendingReview = null, pendingComment = null;
 const liveAnchors = new Map();
@@ -53,7 +54,7 @@ const timings = performanceMonitor(entry => send('performance', entry));
 timings.observe();
 const saveState = () => {
   if (review.file) { if (draftTarget) savedComposers[review.file] = draftTarget; else delete savedComposers[review.file]; }
-  api.setState({ drafts, composers: savedComposers, conflictDraft, file: review.file, overview, scrollTop: editor?.scrollDOM.scrollTop,
+  api.setState({ drafts, composers: savedComposers, conflictDraft, file: review.file, overview, closedOverviewFiles: [...closedOverviewFiles], scrollTop: editor?.scrollDOM.scrollTop,
     showPdf: $('showPdf').checked, showComments: $('showComments').checked });
 };
 const make = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; };
@@ -326,6 +327,7 @@ function visibleThreads() {
 }
 function manuscriptThreads() { return projectComments(review.threads, review.files || [review.file], $('resolved').checked); }
 function jumpThread(thread) {
+  if (overview && closedOverviewFiles.delete(thread.file)) saveState();
   if (thread.file !== review.file) {
     requestNavigation({ file: thread.file, thread: thread.id }); return;
   }
@@ -367,17 +369,39 @@ function renderOverview() {
   $('currentComments').classList.toggle('active', !overview); $('allComments').classList.toggle('active', overview);
   $('currentComments').setAttribute('aria-pressed', String(!overview)); $('allComments').setAttribute('aria-pressed', String(overview));
   if (!overview) return;
+  const scrollTop = list.scrollTop;
   list.replaceChildren();
   if (!threads.length) { list.append(make('p', t('No comments in this manuscript.'), 'overview-empty')); return; }
+  const counts = new Map();
+  for (const thread of threads) counts.set(thread.file, (counts.get(thread.file) || 0) + 1);
   let group;
   for (const thread of threads) {
-    if (group !== thread.file) { group = thread.file; list.append(make('h3', group, 'overview-file')); }
+    if (group?.dataset.file !== thread.file) {
+      const file = thread.file;
+      group = make('details', undefined, 'overview-group'); group.dataset.file = file;
+      group.open = !closedOverviewFiles.has(file);
+      const heading = make('summary', undefined, 'overview-file');
+      const count = counts.get(file);
+      heading.setAttribute('aria-label', `${file} (${count})`);
+      heading.append(make('span', file), make('span', String(count), 'count'));
+      group.append(heading);
+      const disclosure = group;
+      group.addEventListener('toggle', () => {
+        if (!disclosure.isConnected) return;
+        const closed = !disclosure.open;
+        if (closed === closedOverviewFiles.has(file)) return;
+        if (closed) closedOverviewFiles.add(file); else closedOverviewFiles.delete(file);
+        saveState();
+      });
+      list.append(group);
+    }
     const entry = button(undefined, () => { overview = false; jumpThread(thread); renderOverview(); scheduleLayout(); saveState(); });
     entry.className = 'overview-comment' + (selectedThread === thread.id ? ' active' : '');
     entry.setAttribute('aria-current', String(selectedThread === thread.id));
     entry.append(make('small', t('Line {0}', thread.range.startLine)), make('span', thread.comments[0]?.body || thread.snapshot));
-    list.append(entry);
+    group.append(entry);
   }
+  list.scrollTop = scrollTop;
 }
 $('allComments').addEventListener('click', () => { overview = true; renderOverview(); saveState(); });
 $('currentComments').addEventListener('click', () => { overview = false; renderOverview(); scheduleLayout(); saveState(); });
