@@ -281,7 +281,14 @@ function initialize(msg) {
           pendingChanges = pendingChanges.compose(update.changes);
           clearTimeout(flushTimer); flushTimer = setTimeout(flush, 60); scheduleLayout();
         }
-        if (update.selectionSet) { forward(); }
+        if (update.selectionSet) {
+          forward();
+          const target = draftTarget;
+          if (!update.docChanged && target && cards.has('new') && update.state.selection.main.empty) {
+            // Wait until CodeMirror finishes its update before removing decorations.
+            queueMicrotask(() => { if (draftTarget === target && editor.state.selection.main.empty) cancelCompose(false); });
+          } else if (target) updateComposer();
+        }
         if (update.docChanged) updateComparisonCount();
         if (update.geometryChanged || update.docChanged) commentLayoutDirty = true;
         if (update.viewportChanged || update.geometryChanged || update.docChanged) scheduleLayout();
@@ -591,10 +598,16 @@ function finishComment() {
     endLine: b.number, endColumn: draftTarget.to - b.from + 1 } });
   pendingComment = null;
 }
-function cancelCompose() {
+function cancelCompose(focus = true) {
   cards.get('new')?.element.remove(); cards.delete('new'); delete drafts[key('new')];
   draftTarget = null; pendingComment = null; commentPending = false; if (selectedThread === 'new') selectedThread = null;
-  saveState(); refreshDecorations(); editor.focus();
+  if (layoutAnchor === 'new') {
+    const items = cachedCommentLayout?.items || [], at = items.findIndex(item=>item.id==='new');
+    layoutAnchor = items.slice(at+1).find(item=>cards.has(item.id))?.id || [...cards.keys()][0] || null;
+    followSource = true;
+  }
+  commentLayoutDirty = true;
+  saveState(); refreshDecorations(); if (focus) editor.focus();
 }
 function updateComposer() {
   const card = cards.get('new')?.element; if (!card || !draftTarget) return;
@@ -602,6 +615,8 @@ function updateComposer() {
   card.querySelector('.quote').textContent = draftTarget.snapshot.slice(0, 180);
   const types = card.querySelector('.composer-type');
   if (types) types.textContent = commentTags(draftTarget.tags).map(tag=>t(commentTagLabels[tag])).join(' · ');
+  const update = card.querySelector('.composer-update-selection'), current = snapshotSelection();
+  if (update) update.hidden = draftTarget.status === 'attached' && current.from === draftTarget.from && current.to === draftTarget.to && current.snapshot === draftTarget.snapshot;
 }
 function compose() {
   if (!editor) return;
@@ -609,7 +624,7 @@ function compose() {
   if (cards.has('new')) { cards.get('new').element.querySelector('textarea').focus(); return; }
   draftTarget = { ...snapshotSelection(), status: 'attached', tags: ['action'] };
   const card = make('article', undefined, 'card composer'); card.dataset.thread = 'new'; commentLayoutDirty = true;
-  card.append(make('strong', t('Comment on line {0}', draftTarget.range.startLine)));
+  const heading = make('div',undefined,'composer-heading'); heading.append(make('strong', t('Comment on line {0}', draftTarget.range.startLine))); card.append(heading);
   const quote = make('p', draftTarget.snapshot.slice(0, 180), 'quote'); card.append(quote);
   const composer = crypto.randomUUID(); card.dataset.composer = composer;
   const type = button(t('Action required'),()=>send('chooseComposerType',{composer,tags:commentTags(draftTarget.tags)}));
@@ -626,11 +641,16 @@ function compose() {
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelCompose(); }
     else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submit(); }
   });
-  card.append(input, button(t('Add'), submit), button(t('Cancel'), cancelCompose), button(t('Update selection'), () => {
+  const actions = make('div',undefined,'composer-actions');
+  const add = button(t('Add'), submit); add.className = 'composer-submit'; add.disabled = !input.value.trim();
+  input.addEventListener('input',()=>{ add.disabled = !input.value.trim(); });
+  const cancel = button(t('Cancel'),()=>cancelCompose()); cancel.className = 'composer-cancel';
+  const update = button(t('Update selection'), () => {
     draftTarget = { ...snapshotSelection(), status: 'attached', tags: draftTarget.tags }; updateComposer(); refreshDecorations(); input.focus();
-  }));
+  }); update.className = 'composer-update-selection';
+  actions.append(add,cancel,update); card.append(input,actions);
   $('cards').append(card); cards.set('new', { element: card }); selectedThread = 'new';
-  layoutAnchor = 'new'; orderCommentCards(); requestCommentAlignment(); refreshDecorations(); scheduleLayout(); input.focus();
+  layoutAnchor = 'new'; updateComposer(); orderCommentCards(); requestCommentAlignment(); refreshDecorations(); scheduleLayout(); input.focus();
 }
 
 let pdfLoadGeneration = 0;
@@ -719,6 +739,7 @@ $('comments').addEventListener('wheel', event => {
 }, {passive:false});
 $('commentBody').addEventListener('pointerdown', event => {
   if (event.target.closest('.card,button,input,textarea,label,summary')) return;
+  if (cards.has('new')) cancelCompose(false);
   selectedThread = null; cancelCommentAlignment(); refreshDecorations(); scheduleLayout(); saveState();
 });
 $('cards').addEventListener('scroll', () => { if (expectedRailScroll === null || Math.abs($('cards').scrollTop-expectedRailScroll) > 1) commentOffset = $('cards').scrollTop - (editor.scrollDOM.scrollTop-commentOrigin); saveState(); }, {passive:true});
