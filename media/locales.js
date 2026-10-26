@@ -1,4 +1,11 @@
 const ja = {
+  "Filter comments": "コメントを絞り込む",
+  "All types": "すべての種類",
+  "Replies": "返信状況",
+  "Any reply status": "指定なし",
+  "AI replied, unresolved": "AI返信あり・未解決",
+  "No AI reply, unresolved": "AI返信なし・未解決",
+  "Clear filters": "絞り込みを解除",
   "Comment type": "コメントの種類",
   "Filter comments by type": "種類で絞り込む",
   "Change type…": "種類を変更…",

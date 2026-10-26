@@ -142,5 +142,6 @@
   "Filter comments by type": "種類で絞り込む",
   "Change type…": "種類を変更…",
   "Compare with file…": "ファイルと比較…",
-  "Select baseline file": "比較元のファイルを選択"
+  "Select baseline file": "比較元のファイルを選択",
+  "Filter comments": "コメントを絞り込む"
 }

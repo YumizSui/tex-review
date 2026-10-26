@@ -30,3 +30,25 @@ it('accepts one type for new writes and retains multiple tags only when reading 
  expect(()=>commentTypeTags(['question','todo'])).toThrow('Choose one');expect(()=>commentTypeTags(['invalid'])).toThrow('Choose one');
  expect(commentTags(['question','todo'])).toEqual(['question','todo']);
 });
+
+
+describe('AI reply filters', () => {
+ const thread = (extra: any[] = []) => fold('review', [event, ...extra]).threads[0];
+ const reply = {op:'reply' as const,thread:'t1',body:'Changed the passage.',author:'agent',ts:event.ts};
+ it('finds AI replies only on unresolved threads and combines type and search', () => {
+  const open = thread([reply]);
+  expect(commentMatches(open, 'passage', ['action'], 'ai-replied')).toBe(true);
+  expect(commentMatches(open, '', ['todo'], 'ai-replied')).toBe(false);
+  expect(commentMatches(thread([reply,{op:'resolve',thread:'t1',ts:event.ts}]), '', [], 'ai-replied')).toBe(false);
+  expect(commentMatches(thread(), '', [], 'no-ai-reply')).toBe(true);
+ });
+ it('does not treat a human reply or an AI-authored opening comment as an AI reply', () => {
+  expect(commentMatches(thread([{...reply,author:'reviewer'}]), '', [], 'ai-replied')).toBe(false);
+  const opening = fold('review', [{...event,author:'agent'}]).threads[0];
+  expect(commentMatches(opening, '', [], 'no-ai-reply')).toBe(true);
+ });
+ it('updates when an AI reply is deleted, or a resolved thread is reopened', () => {
+  expect(commentMatches(thread([reply,{op:'delete_comment',comment:'t1.c2',ts:event.ts}]), '', [], 'no-ai-reply')).toBe(true);
+  expect(commentMatches(thread([reply,{op:'resolve',thread:'t1',ts:event.ts},{op:'reopen',thread:'t1',ts:event.ts}]), '', [], 'ai-replied')).toBe(true);
+ });
+});

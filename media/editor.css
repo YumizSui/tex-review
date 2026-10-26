@@ -278,3 +278,13 @@ body.vscode-high-contrast, body.vscode-high-contrast-light { --tex-command: var(
 
 /* Non-TeX documents use the same review editor without PDF tools. */
 .text-only .icon-toggle:has(#showPdf) { display: none; }
+
+.comment-filter-popover { position: absolute; z-index: 10; left: 8px; right: 8px; padding: 8px; max-height: calc(100% - 80px); overflow: auto; border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border)); border-radius: 6px; background: var(--vscode-editorWidget-background); box-shadow: 0 4px 12px var(--vscode-widget-shadow); }
+.comment-filter-popover[hidden] { display: none; }
+.filter-heading { display: block; padding: 5px 4px; font-size: 10px; font-weight: 500; color: var(--vscode-descriptionForeground); }
+.filter-types { display: flex; gap: 4px; flex-wrap: wrap; padding-bottom: 7px; }
+.filter-choice { display: block; width: 100%; text-align: left; padding: 5px 7px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--vscode-foreground); font-size: 11px; }
+.filter-types .filter-choice { width: auto; }
+.filter-choice:hover { background: var(--vscode-toolbar-hoverBackground); }
+.filter-choice[aria-pressed="true"] { background: var(--vscode-inputOption-activeBackground); border-color: var(--vscode-inputOption-activeBorder, transparent); color: var(--vscode-inputOption-activeForeground, var(--vscode-foreground)); }
+.filter-clear { width: 100%; margin-top: 8px; padding: 5px 7px; border: 0; border-top: 1px solid var(--vscode-panel-border); border-radius: 0; background: transparent; text-align: left; font-size: 10px; color: var(--vscode-descriptionForeground); }

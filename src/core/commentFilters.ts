@@ -13,8 +13,17 @@ export function commentTypeTags(value: unknown = ['action']): CommentTag[] {
     throw new Error('Choose one comment type: action, question, todo, or note.');
   return commentTags(value);
 }
+export const commentReplyFilters = ['all', 'ai-replied', 'no-ai-reply'] as const;
+export type CommentReplyFilter = typeof commentReplyFilters[number];
+export const commentReplyLabels: Record<CommentReplyFilter, string> = {
+  all: 'Any reply status', 'ai-replied': 'AI replied, unresolved', 'no-ai-reply': 'No AI reply, unresolved',
+};
 const normalized = (text: string) => text.normalize('NFKC').toLowerCase();
-export function commentMatches(thread: Thread, query = '', tags: readonly string[] = []): boolean {
+export function commentMatches(thread: Thread, query = '', tags: readonly string[] = [], replies: CommentReplyFilter = 'all'): boolean {
+  if (replies !== 'all') {
+    const aiReplied = thread.comments.slice(1).some(comment => comment.author === 'agent');
+    if (thread.status !== 'open' || (replies === 'ai-replied' ? !aiReplied : aiReplied)) return false;
+  }
   if (tags.length && !commentTags(thread.tags).some(tag => tags.includes(tag))) return false;
   const terms = normalized(query).trim().split(/\s+/).filter(Boolean);
   const text = normalized(thread.comments.map(comment => comment.body).join('\n'));

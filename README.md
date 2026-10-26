@@ -12,7 +12,7 @@ anchored to the source text.
 ## Features
 
 - One manuscript tab for TeX source, threaded comments, and PDF preview.
-- A comment list grouped by source file, with search, comment types, and navigation across included TeX files.
+- A comment list grouped by source file, with search, comment types, AI reply filters, and navigation across included TeX files.
 - Text and Markdown files reviewed without the PDF pane.
 - Stable local links to individual comment threads.
 - PDF builds and bidirectional source–PDF navigation through SyncTeX.

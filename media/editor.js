@@ -1,4 +1,4 @@
-import { commentTagIds, commentTagLabels, commentTags, commentMatches, commentPreview } from '../src/core/commentFilters';
+import { commentTagIds, commentTagLabels, commentTags, commentMatches, commentPreview, commentReplyFilters, commentReplyLabels } from '../src/core/commentFilters';
 import { commentScrollHandler } from './commentScroll.js';
 import { performanceMonitor } from './performance.js';
 import { documentUpdate } from '../src/core/documentSync';
@@ -29,6 +29,8 @@ let openNativeRequested = false, pendingNavigation = null, navigationSent = fals
 const sourceStates = new Map();
 let overview = previous.overview || false;
 let commentQuery = previous.commentQuery || '', tagFilter = previous.tagFilter || [];
+let replyFilter = commentReplyFilters.includes(previous.replyFilter) ? previous.replyFilter : 'all';
+const hasCommentFilter = () => !!commentQuery || tagFilter.length > 0 || replyFilter !== 'all';
 const closedOverviewFiles = new Set(previous.closedOverviewFiles || []);
 const savedComposers = previous.composers || {};
 let pendingChanges = ChangeSet.empty(0), pendingReview = null, pendingComment = null;
@@ -58,7 +60,7 @@ const timings = performanceMonitor(entry => send('performance', entry));
 timings.observe();
 const saveState = () => {
   if (review.file) { if (draftTarget) savedComposers[review.file] = draftTarget; else delete savedComposers[review.file]; }
-  api.setState({ drafts, composers: savedComposers, conflictDraft, file: review.file, overview, commentQuery, tagFilter, closedOverviewFiles: [...closedOverviewFiles], commentScrollTop: $('cards').scrollTop, commentPadding: parseFloat($('cards').style.paddingTop) || 10, scrollTop: editor?.scrollDOM.scrollTop,
+  api.setState({ drafts, composers: savedComposers, conflictDraft, file: review.file, overview, commentQuery, tagFilter, replyFilter, closedOverviewFiles: [...closedOverviewFiles], commentScrollTop: $('cards').scrollTop, commentPadding: parseFloat($('cards').style.paddingTop) || 10, scrollTop: editor?.scrollDOM.scrollTop,
     showPdf: $('showPdf').checked, showComments: $('showComments').checked });
 };
 const make = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; };
@@ -189,7 +191,7 @@ function refreshDecorations() {
     const active = id === selectedThread;
     if (entry.element.classList.contains('is-active') !== active) { entry.element.classList.toggle('is-active',active); commentLayoutDirty = true; }
   }
-  const ranges = review.threads.filter(t => t.file === review.file && t.status === 'open' && commentMatches(t, commentQuery, tagFilter)).map(locate)
+  const ranges = review.threads.filter(t => t.file === review.file && t.status === 'open' && commentMatches(t, commentQuery, tagFilter, replyFilter)).map(locate)
     .filter(t => !t.outdated && t.to > t.from)
     .map(t => ({ from: t.from, to: t.to, selected: t.id === selectedThread }));
   if (draftTarget?.to > draftTarget?.from) ranges.push({ from: draftTarget.from, to: draftTarget.to, selected: true });
@@ -251,7 +253,7 @@ function markerExtension(side) {
 }
 function initialize(msg) {
   if (msg.selection?.thread) {
-    commentQuery = ''; tagFilter = []; $('commentSearch').value = ''; updateTagFilter();
+    commentQuery = ''; tagFilter = []; replyFilter = 'all'; $('commentSearch').value = ''; updateTagFilter();
     if (msg.showResolved) $('resolved').checked = true;
   }
   if (editor) {
@@ -379,9 +381,9 @@ function focusCard(id) {
   refreshDecorations();
 }
 function visibleThreads() {
-  return review.threads.filter(thread => thread.file === review.file && ($('resolved').checked || thread.status === 'open') && commentMatches(thread, commentQuery, tagFilter));
+  return review.threads.filter(thread => thread.file === review.file && ($('resolved').checked || thread.status === 'open') && commentMatches(thread, commentQuery, tagFilter, replyFilter));
 }
-function manuscriptThreads() { return projectComments(review.threads.filter(thread => commentMatches(thread, commentQuery, tagFilter)), review.files || [review.file], $('resolved').checked); }
+function manuscriptThreads() { return projectComments(review.threads.filter(thread => commentMatches(thread, commentQuery, tagFilter, replyFilter)), review.files || [review.file], $('resolved').checked); }
 function jumpThread(thread) {
   if (overview && closedOverviewFiles.delete(thread.file)) saveState();
   if (thread.file !== review.file) {
@@ -418,9 +420,9 @@ function finishNavigation() {
 }
 function renderOverview() {
   const threads = manuscriptThreads();
-  $('commentEmpty').hidden = overview || visibleThreads().length > 0 || cards.has('new') || !(commentQuery || tagFilter.length);
+  $('commentEmpty').hidden = overview || visibleThreads().length > 0 || cards.has('new') || !hasCommentFilter();
   $('previousComment').disabled = $('nextComment').disabled = threads.length === 0;
-  $('overviewCount').textContent = review.threads.filter(thread => (review.files || []).includes(thread.file) && thread.status === 'open' && commentMatches(thread, commentQuery, tagFilter)).length || '';
+  $('overviewCount').textContent = review.threads.filter(thread => (review.files || []).includes(thread.file) && thread.status === 'open' && commentMatches(thread, commentQuery, tagFilter, replyFilter)).length || '';
   const list = $('commentOverview');
   list.hidden = !overview; $('cards').hidden = overview;
   $('currentComments').classList.toggle('active', !overview); $('allComments').classList.toggle('active', overview);
@@ -428,7 +430,7 @@ function renderOverview() {
   if (!overview) return;
   const scrollTop = list.scrollTop;
   list.replaceChildren();
-  if (!threads.length) { list.append(make('p', t(commentQuery || tagFilter.length ? 'No matching comments.' : 'No comments in this manuscript.'), 'overview-empty')); return; }
+  if (!threads.length) { list.append(make('p', t(hasCommentFilter() ? 'No matching comments.' : 'No comments in this manuscript.'), 'overview-empty')); return; }
   const counts = new Map();
   for (const thread of threads) counts.set(thread.file, (counts.get(thread.file) || 0) + 1);
   let group;
@@ -461,11 +463,49 @@ function renderOverview() {
   list.scrollTop = scrollTop;
 }
 function updateTagFilter() {
-  const active = tagFilter.length > 0;
+  const active = tagFilter.length > 0 || replyFilter !== 'all';
   $('filterCommentTags').classList.toggle('is-filtered', active);
   $('filterCommentTags').setAttribute('aria-pressed', String(active));
-  $('filterCommentTags').title = active ? tagFilter.map(tag => t(commentTagLabels[tag])).join(' · ') : t('Filter comments by type');
+  $('filterCommentTags').title = active
+    ? [...tagFilter.map(tag => t(commentTagLabels[tag])), ...(replyFilter !== 'all' ? [t(commentReplyLabels[replyFilter])] : [])].join(' · ')
+    : t('Filter comments');
 }
+const commentFilterPopover = make('div', undefined, 'comment-filter-popover');
+commentFilterPopover.hidden = true; commentFilterPopover.id = 'commentFilterPopover';
+commentFilterPopover.setAttribute('role', 'dialog'); commentFilterPopover.setAttribute('aria-label', t('Filter comments'));
+$('comments').append(commentFilterPopover);
+$('filterCommentTags').setAttribute('aria-haspopup', 'dialog');
+$('filterCommentTags').setAttribute('aria-controls', commentFilterPopover.id);
+$('filterCommentTags').setAttribute('aria-expanded', 'false');
+function closeCommentFilter(focus = false) {
+  commentFilterPopover.hidden = true; $('filterCommentTags').setAttribute('aria-expanded', 'false');
+  if (focus) $('filterCommentTags').focus({preventScroll:true});
+}
+function renderCommentFilter() {
+  const focused = document.activeElement?.dataset.filterChoice;
+  commentFilterPopover.replaceChildren();
+  const choice = (label, selected, id, action) => {
+    const control = button(t(label), () => { action(); updateTagFilter(); renderComments(); saveState(); renderCommentFilter(); });
+    control.className = 'filter-choice'; control.dataset.filterChoice = id; control.setAttribute('aria-pressed', String(selected));
+    return control;
+  };
+  commentFilterPopover.append(make('strong', t('Comment type'), 'filter-heading'));
+  const types = make('div', undefined, 'filter-types');
+  types.append(choice('All types', !tagFilter.length, 'all-types', () => { tagFilter = []; }));
+  for (const tag of commentTagIds) types.append(choice(commentTagLabels[tag], tagFilter.includes(tag), tag,
+    () => { tagFilter = tagFilter.includes(tag) ? tagFilter.filter(item => item !== tag) : [...tagFilter, tag]; }));
+  commentFilterPopover.append(types, make('strong', t('Replies'), 'filter-heading'));
+  for (const filter of commentReplyFilters) commentFilterPopover.append(choice(commentReplyLabels[filter], replyFilter === filter, filter, () => {replyFilter = filter;}));
+  const clear = button(t('Clear filters'), () => { tagFilter = []; replyFilter = 'all'; updateTagFilter(); renderComments(); saveState(); renderCommentFilter(); });
+  clear.className = 'filter-clear'; commentFilterPopover.append(clear);
+  if (focused) [...commentFilterPopover.querySelectorAll('button')].find(control => control.dataset.filterChoice === focused)?.focus({preventScroll:true});
+}
+commentFilterPopover.addEventListener('keydown', event => {
+  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeCommentFilter(true); }
+});
+document.addEventListener('pointerdown', event => {
+  if (!commentFilterPopover.hidden && !commentFilterPopover.contains(event.target) && !$('filterCommentTags').contains(event.target)) closeCommentFilter();
+});
 $('toggleCommentSearch').addEventListener('click', () => {
   const row = $('commentSearchRow'); row.hidden = !row.hidden;
   if (!row.hidden) $('commentSearch').focus();
@@ -484,7 +524,12 @@ $('commentSearch').addEventListener('keydown', event => {
   event.preventDefault(); clearTimeout(commentSearchTimer); commentQuery = ''; $('commentSearch').value = ''; $('commentSearchRow').hidden = true;
   renderComments(); saveState(); $('toggleCommentSearch').focus();
 });
-$('filterCommentTags').addEventListener('click', () => send('chooseTagFilter', {tags:tagFilter}));
+$('filterCommentTags').addEventListener('click', () => {
+  if (!commentFilterPopover.hidden) { closeCommentFilter(); return; }
+  renderCommentFilter(); commentFilterPopover.style.top = `${$('commentHeader').offsetHeight + 4}px`;
+  commentFilterPopover.hidden = false; $('filterCommentTags').setAttribute('aria-expanded', 'true');
+  commentFilterPopover.querySelector('button')?.focus({preventScroll:true});
+});
 updateTagFilter();
 $('allComments').addEventListener('click', () => { overview = true; renderOverview(); saveState(); });
 $('currentComments').addEventListener('click', () => { overview = false; renderOverview(); scheduleLayout(); saveState(); });
@@ -495,14 +540,14 @@ function clearCards() { for (const c of cards.values()) c.element.remove(); card
 function renderComments() {
   if (!editor) return;
   commentLayoutDirty = true;
-  const filterSignature = JSON.stringify([commentQuery,tagFilter]);
-  if (filterSignature !== commentFilterSignature) { resetCommentList = !!commentQuery || tagFilter.length > 0; commentFilterSignature = filterSignature; }
+  const filterSignature = JSON.stringify([commentQuery,tagFilter,replyFilter]);
+  if (filterSignature !== commentFilterSignature) { resetCommentList = hasCommentFilter(); commentFilterSignature = filterSignature; }
   const currentIds = new Set(), restoreScroll = [], railScroll = $('cards').scrollTop;
   const focusedInput = document.activeElement instanceof HTMLTextAreaElement && $('cards').contains(document.activeElement) ? document.activeElement : null;
   const focusedSelection = focusedInput ? [focusedInput.selectionStart, focusedInput.selectionEnd] : null;
   let restoreInput = null;
   const threads = visibleThreads();
-  $('commentCount').textContent = review.threads.filter(thread => thread.file === review.file && thread.status === 'open' && commentMatches(thread, commentQuery, tagFilter)).length || '';
+  $('commentCount').textContent = review.threads.filter(thread => thread.file === review.file && thread.status === 'open' && commentMatches(thread, commentQuery, tagFilter, replyFilter)).length || '';
   renderOverview();
   for (const thread of threads) {
     currentIds.add(thread.id);
@@ -873,7 +918,6 @@ window.addEventListener('message', event => timings.measure(`message.${event.dat
     editor.dispatch({ selection: { anchor: Math.min(length, m.from), head: Math.min(length, m.to) }, effects: EditorView.scrollIntoView(Math.min(length, m.from), { y: 'center' }) });
     if (m.compose) compose(); else editor.focus();
   }
-  else if (m.type === 'tagFilter') { tagFilter = m.tags; updateTagFilter(); renderComments(); saveState(); }
   else if (m.type === 'linkCopied') $('status').textContent = t('Comment link copied');
   else if (m.type === 'transaction') { editor.dispatch({effects:transactionConfig.reconfigure(EditorState.readOnly.of(!!m.busy))}); $('status').textContent = m.busy ? t('AI edit pending') : t('Changes applied'); }
   else if (m.type === 'syntax') {
