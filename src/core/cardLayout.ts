@@ -90,3 +90,21 @@ export function revealCommentCard(scrollTop: number, cardTop: number, cardHeight
   const maximum = Math.max(minimum, cardTop - inset);
   return Math.max(minimum, Math.min(maximum, scrollTop));
 }
+
+
+/** Keep a surviving pivot, or use the next discussion after a removed pivot. */
+export function survivingCommentAnchor(previous: readonly string[], current: readonly string[], anchor: string | null): string | null {
+  if (anchor && current.includes(anchor)) return anchor;
+  const at = anchor ? previous.indexOf(anchor) : -1;
+  return previous.slice(at + 1).find(id => current.includes(id))
+    ?? [...previous.slice(0, Math.max(0, at))].reverse().find(id => current.includes(id))
+    ?? current[0] ?? null;
+}
+
+/** Fully offscreen threads have a dedicated way back into the viewport. */
+export function offscreenCommentCards(cards: readonly {id: string; top: number; height: number}[], scrollTop: number, viewportHeight: number) {
+  return {
+    above: cards.filter(card => card.top + card.height <= scrollTop).map(card => card.id),
+    below: cards.filter(card => card.top >= scrollTop + viewportHeight).map(card => card.id),
+  };
+}

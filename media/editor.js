@@ -17,7 +17,7 @@ import * as pdfjs from 'pdfjs-dist';
 import { anchor } from '../src/core/anchor';
 import { commentHighlights } from '../src/core/commentHighlights';
 import { projectComments } from '../src/core/projectComments';
-import { sourceLinkedCards, revealCommentCard } from '../src/core/cardLayout';
+import { sourceLinkedCards, revealCommentCard, survivingCommentAnchor, offscreenCommentCards } from '../src/core/cardLayout';
 
 const api = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
@@ -39,7 +39,7 @@ let syncRequest = 0, requestedBuildMode;
 let flushTimer, syncTimer, commentPending = false, composing = false, saveRequested = false, pendingCompose = false, buildRequested = null;
 const layoutMeasureKey = {};
 let followSource = false, commentOffset = 0, commentOrigin = 0, lastLinkedSourceTop = null, expectedRailScroll = null, layoutAnchor = null, commentLayoutDirty = true, cachedCommentLayout = null, resetCommentList = false, commentFilterSignature = '';
-let alignComment = false, alignmentGeneration = 0, restoringCommentFocus = false, pendingCommentScroll = null;
+let alignComment = false, revealComment = null, alignmentSample = null, alignmentStable = 0, alignmentFrames = 0, alignmentGeneration = 0, restoringCommentFocus = false, pendingCommentScroll = null;
 const nativeTokens = StateEffect.define();
 const nativeDecorations = StateField.define({
   create: () => Decoration.none,
@@ -60,7 +60,7 @@ const timings = performanceMonitor(entry => send('performance', entry));
 timings.observe();
 const saveState = () => {
   if (review.file) { if (draftTarget) savedComposers[review.file] = draftTarget; else delete savedComposers[review.file]; }
-  api.setState({ drafts, composers: savedComposers, conflictDraft, file: review.file, overview, commentQuery, tagFilter, replyFilter, closedOverviewFiles: [...closedOverviewFiles], commentScrollTop: $('cards').scrollTop, commentPadding: parseFloat($('cards').style.paddingTop) || 10, scrollTop: editor?.scrollDOM.scrollTop,
+  api.setState({ drafts, composers: savedComposers, conflictDraft, file: review.file, overview, commentQuery, tagFilter, replyFilter, closedOverviewFiles: [...closedOverviewFiles], commentScrollTop: $('cards').scrollTop, commentPadding: parseFloat($('commentLayout').style.paddingTop) || 10, scrollTop: editor?.scrollDOM.scrollTop,
     showPdf: $('showPdf').checked, showComments: $('showComments').checked });
 };
 const make = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; };
@@ -109,21 +109,21 @@ function scheduleLayout() {
     read: () => timings.measure('comments.measure', measureLayout),
     write: result => timings.measure('comments.layout', () => applyLayout(result)) });
 }
-function requestCommentAlignment() {
+function requestCommentAlignment(id = selectedThread) {
   const generation = ++alignmentGeneration;
   requestAnimationFrame(() => {
     if (generation !== alignmentGeneration) return;
-    alignComment = true; scheduleLayout();
+    alignComment = true; revealComment = id; alignmentSample = null; alignmentStable = alignmentFrames = 0; scheduleLayout();
   });
 }
-function cancelCommentAlignment() { ++alignmentGeneration; alignComment = false; }
+function cancelCommentAlignment() { ++alignmentGeneration; alignComment = false; revealComment = null; }
 function measureLayout() {
   if (!$('showComments').checked || overview) return null;
   const area = $('commentBody').getBoundingClientRect(), rail = $('cards');
   const signature = [area.width, area.height, editor.contentHeight, layoutAnchor];
   if (commentLayoutDirty || !cachedCommentLayout || signature.some((value, i) => value !== cachedCommentLayout.signature[i])) {
     const byId = new Map(review.threads.map(thread => [thread.id, thread]));
-    const items = [...rail.children].map(element => {
+    const items = [...$('commentLayout').children].map(element => {
       const id = element.dataset.thread || 'new', thread = byId.get(id);
       const target = id === 'new' ? draftTarget : thread ? locate(thread) : null;
       if (!target) return null;
@@ -139,13 +139,13 @@ function measureLayout() {
 }
 function applyLayout(result) {
   if (editor.dom.style.getPropertyValue('--review-comment-overflow') !== '0px') editor.dom.style.setProperty('--review-comment-overflow', '0px');
-  if (!result) return;
+  if (!result) { aboveComments.hidden = belowComments.hidden = true; return; }
   const rail = $('cards'), before = rail.scrollTop;
   const last = result.items.at(-1);
   const contentBottom = result.paddingTop + result.items.reduce((sum,item,i)=>sum+item.height+result.gaps[i],0);
   const tail = Math.max(10,result.height-(last?.height || 0)-10,result.sourceMaximum-result.origin+result.height-contentBottom);
   const setStyle = (element, name, value) => { const px = `${Math.round(value * 100) / 100}px`; if (element.style[name] !== px) element.style[name] = px; };
-  setStyle(rail,'paddingTop',result.paddingTop); setStyle(rail,'paddingBottom',tail);
+  setStyle($('commentLayout'),'paddingTop',result.paddingTop); setStyle($('commentLayout'),'paddingBottom',tail);
   result.items.forEach((item,i) => {
     setStyle(item.element,'marginTop',result.gaps[i]);
     const label = item.element.querySelector('.card-heading > button');
@@ -155,25 +155,39 @@ function applyLayout(result) {
   });
   commentOrigin = result.origin;
   const baseline = result.sourceTop - commentOrigin;
+  let alignmentPosition = null;
   if (resetCommentList && result.items.length) { rail.scrollTop = result.items[0].element.offsetTop-10; commentOffset = rail.scrollTop-baseline; resetCommentList = false; }
   else if (alignComment) {
-    let top = result.paddingTop, target;
-    for (let i = 0; i < result.items.length; i++) {
-      top += result.gaps[i];
-      if (result.items[i].id === selectedThread) { target = {top, height: result.items[i].height}; break; }
-      top += result.items[i].height;
-    }
-    rail.scrollTop = target ? revealCommentCard(Math.max(0, baseline), target.top, target.height, result.height) : Math.max(0, baseline);
+    const target = result.items.find(item => item.id === (revealComment || selectedThread));
+    // Explicit navigation is rare: use the laid-out box rather than estimated
+    // packing coordinates, including when a resolved card just disappeared.
+    if (target) alignmentPosition = [result.sourceTop, target.element.offsetTop, target.element.offsetHeight, rail.clientHeight, editor.contentHeight];
+    rail.scrollTop = target ? revealCommentCard(Math.max(0, baseline), target.element.offsetTop, target.element.offsetHeight, rail.clientHeight) : Math.max(0, baseline);
     commentOffset = rail.scrollTop - baseline;
   }
   else if (followSource || lastLinkedSourceTop !== null && Math.abs(result.sourceTop-lastLinkedSourceTop) > .5) rail.scrollTop = Math.max(0,baseline+commentOffset);
   else { rail.scrollTop = before; commentOffset = rail.scrollTop-baseline; }
   lastLinkedSourceTop = result.sourceTop; expectedRailScroll = rail.scrollTop;
-  alignComment = false; followSource = false;
+  if (alignComment && alignmentPosition) {
+    const stable = alignmentSample && alignmentPosition.every((value, i) => Math.abs(value - alignmentSample[i]) < .5);
+    alignmentStable = stable ? alignmentStable + 1 : 0; alignmentSample = alignmentPosition; ++alignmentFrames;
+    if (alignmentStable < 2 && alignmentFrames < 12) {
+      const generation = alignmentGeneration;
+      requestAnimationFrame(() => { if (generation === alignmentGeneration) scheduleLayout(); });
+    } else { alignComment = false; revealComment = null; }
+  } else { alignComment = false; revealComment = null; }
+  followSource = false;
+  let top = result.paddingTop;
+  const positions = result.items.map((item, i) => {
+    top += result.gaps[i]; const position = {id: item.id, top, height: item.height}; top += item.height; return position;
+  });
+  const outside = offscreenCommentCards(positions, rail.scrollTop, result.height);
+  updateOutsideComments(aboveComments, outside.above, true);
+  updateOutsideComments(belowComments, outside.below, false);
 }
 
 function orderCommentCards() {
-  const rail = $('cards');
+  const rail = $('commentLayout');
   const ordered = [...cards].map(([id, entry]) => {
     const thread = review.threads.find(thread => thread.id === id);
     return {id, entry, from: id === 'new' ? draftTarget?.from ?? Infinity : thread ? locate(thread).from : Infinity};
@@ -257,14 +271,14 @@ function initialize(msg) {
     if (msg.showResolved) $('resolved').checked = true;
   }
   if (editor) {
-    sourceStates.set(review.file, { state: editor.state, scrollTop: editor.scrollDOM.scrollTop, commentScrollTop: $('cards').scrollTop, commentPadding: parseFloat($('cards').style.paddingTop) || 10, draftTarget,
+    sourceStates.set(review.file, { state: editor.state, scrollTop: editor.scrollDOM.scrollTop, commentScrollTop: $('cards').scrollTop, commentPadding: parseFloat($('commentLayout').style.paddingTop) || 10, draftTarget,
       conflictDraft, selectedThread });
     clearCards(); editor.destroy(); liveAnchors.clear();
   }
   const cached = sourceStates.get(msg.file);
   cancelCommentAlignment(); followSource = false; lastLinkedSourceTop = null; expectedRailScroll = null; cachedCommentLayout = null; commentLayoutDirty = true; layoutAnchor = null;
   pendingCommentScroll = cached?.commentScrollTop ?? (previous.file === msg.file ? previous.commentScrollTop || 0 : 0);
-  $('cards').style.paddingTop = `${cached?.commentPadding ?? (previous.file === msg.file ? previous.commentPadding || 10 : 10)}px`;
+  $('commentLayout').style.paddingTop = `${cached?.commentPadding ?? (previous.file === msg.file ? previous.commentPadding || 10 : 10)}px`;
   clearTimeout(flushTimer); clearTimeout(syncTimer);
   pendingReview = null; pendingChanges = ChangeSet.empty(msg.text.length); inflight = null;
   draftTarget = null; pendingComment = null; commentPending = false; selectedThread = msg.thread || cached?.selectedThread || null; layoutAnchor = selectedThread;
@@ -536,6 +550,23 @@ $('filterCommentTags').addEventListener('click', () => {
   commentFilterPopover.querySelector('button')?.focus({preventScroll:true});
 });
 updateTagFilter();
+const outsideCommentButton = (above) => {
+  const control = button('', () => {
+    const id = control.dataset.thread;
+    if (id === 'new') { requestCommentAlignment(id); cards.get(id)?.element.querySelector('textarea')?.focus({preventScroll:true}); }
+    else { const thread = review.threads.find(thread => thread.id === id); if (thread) jumpThread(thread); }
+  });
+  control.className = 'outside-comments ' + (above ? 'above' : 'below'); control.hidden = true;
+  $('commentBody').append(control); return control;
+};
+const aboveComments = outsideCommentButton(true), belowComments = outsideCommentButton(false);
+function updateOutsideComments(control, ids, above) {
+  control.hidden = !ids.length;
+  if (!ids.length) return;
+  const label = t(above ? (ids.length === 1 ? '{0} comment above' : '{0} comments above') : (ids.length === 1 ? '{0} comment below' : '{0} comments below'), ids.length);
+  control.textContent = `${above ? '↑' : '↓'} ${label}`; control.setAttribute('aria-label', label);
+  control.dataset.thread = above ? ids.at(-1) : ids[0];
+}
 $('allComments').addEventListener('click', () => { overview = true; renderOverview(); saveState(); });
 $('currentComments').addEventListener('click', () => { overview = false; renderOverview(); scheduleLayout(); saveState(); });
 $('sources').addEventListener('change', () => requestNavigation({ file: $('sources').value }));
@@ -547,6 +578,7 @@ function renderComments() {
   commentLayoutDirty = true;
   const filterSignature = JSON.stringify([commentQuery,tagFilter,replyFilter]);
   if (filterSignature !== commentFilterSignature) { resetCommentList = hasCommentFilter(); commentFilterSignature = filterSignature; }
+  const previousIds = [...cards.keys()], previousAnchor = layoutAnchor;
   const currentIds = new Set(), restoreScroll = [], railScroll = $('cards').scrollTop;
   const focusedInput = document.activeElement instanceof HTMLTextAreaElement && $('cards').contains(document.activeElement) ? document.activeElement : null;
   const focusedSelection = focusedInput ? [focusedInput.selectionStart, focusedInput.selectionEnd] : null;
@@ -636,17 +668,21 @@ function renderComments() {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); input.value = ''; delete drafts[key(thread.id)]; saveState(); editor.focus(); }
       else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submit(); }
     });
-    card.append(input, button(t('Reply'), submit)); $('cards').append(card); cards.set(thread.id, { element: card, signature, pendingReply: old?.pendingReply });
+    card.append(input, button(t('Reply'), submit)); $('commentLayout').append(card); cards.set(thread.id, { element: card, signature, pendingReply: old?.pendingReply });
     restoreScroll.push({card, scrollTop, replySaved});
     if (replySaved?.focus) restoreInput = { input, selection: [input.value.length, input.value.length] };
     else if (focus) restoreInput = { input, selection };
   }
   for (const [id, c] of cards) if (id !== 'new' && !currentIds.has(id)) { c.element.remove(); cards.delete(id); }
-  if (layoutAnchor && !cards.has(layoutAnchor)) {
-    const oldItems = cachedCommentLayout?.items || [], at = oldItems.findIndex(item=>item.id===layoutAnchor);
-    layoutAnchor = oldItems.slice(at+1).find(item=>cards.has(item.id))?.id || [...cards.keys()][0] || null;
+  const remainingIds = [...cards.keys()];
+  if (previousIds.some(id => !cards.has(id))) {
+    const previousOrder = cachedCommentLayout?.items.map(item => item.id) || previousIds;
+    layoutAnchor = survivingCommentAnchor(previousOrder, remainingIds, previousAnchor);
     if (!cards.has(selectedThread)) selectedThread = null;
-    followSource = true;
+    // The previous rail offset belongs to a different packing/origin. It cannot
+    // be carried across resolution or deletion without stranding survivors.
+    commentOffset = 0; followSource = true;
+    if (layoutAnchor) requestCommentAlignment(layoutAnchor);
   }
   orderCommentCards();
   const restored = restoreInput || (focusedInput?.isConnected ? {input:focusedInput,selection:focusedSelection} : null);
@@ -721,7 +757,7 @@ function compose() {
     draftTarget = { ...snapshotSelection(), status: 'attached', tags: draftTarget.tags }; updateComposer(); refreshDecorations(); input.focus();
   }); update.className = 'composer-update-selection';
   actions.append(add,cancel,update); card.append(input,actions);
-  $('cards').append(card); cards.set('new', { element: card }); selectedThread = 'new';
+  $('commentLayout').append(card); cards.set('new', { element: card }); selectedThread = 'new';
   layoutAnchor = 'new'; updateComposer(); orderCommentCards(); requestCommentAlignment(); refreshDecorations(); scheduleLayout(); input.focus();
 }
 
@@ -834,9 +870,10 @@ $('cards').addEventListener('scroll', () => {
     if (draggingCommentRail && expectedRailScroll !== null) syncSourceFromComments(expectedRailScroll, top);
     else commentOffset = top - (editor.scrollDOM.scrollTop - commentOrigin);
   }
-  expectedRailScroll = top; saveState();
+  expectedRailScroll = top; scheduleLayout(); saveState();
 }, { passive: true });
 $('source').addEventListener('wheel', cancelCommentAlignment, {passive:true});
+$('source').addEventListener('pointerdown', cancelCommentAlignment, {passive:true});
 $('roots').addEventListener('change', () => requestNavigation({ file: $('roots').value, root: $('roots').value, explicit: true }));
 $('selectPdf').addEventListener('click', () => send('selectPdf'));
 $('prevPage').addEventListener('click', () => { if (pdf && pdfPage > 1) { pdfView.goTo(pdfPage - 1); } });

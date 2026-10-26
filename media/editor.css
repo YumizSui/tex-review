@@ -250,7 +250,8 @@ body.vscode-high-contrast, body.vscode-high-contrast-light { --tex-command: var(
 
 /* Source-coordinate gaps remain fixed while the source scrolls. Threads retain their own scroll. */
 #commentBody { overflow: clip; }
-#cards { display: flex; flex-direction: column; gap: 0; padding: 10px; overflow: auto; overscroll-behavior: contain; overflow-anchor: none; pointer-events: auto; }
+#cards { display: block; padding: 0; overflow: auto; overscroll-behavior: contain; overflow-anchor: none; pointer-events: auto; }
+#commentLayout { display: flex; flex-direction: column; gap: 0; padding: 10px; }
 #cards .card { position: relative; top: auto; left: auto; right: auto; flex: none; }
 
 
@@ -288,3 +289,8 @@ body.vscode-high-contrast, body.vscode-high-contrast-light { --tex-command: var(
 .filter-choice:hover { background: var(--vscode-toolbar-hoverBackground); }
 .filter-choice[aria-pressed="true"] { background: var(--vscode-inputOption-activeBackground); border-color: var(--vscode-inputOption-activeBorder, transparent); color: var(--vscode-inputOption-activeForeground, var(--vscode-foreground)); }
 .filter-clear { width: 100%; margin-top: 8px; padding: 5px 7px; border: 0; border-top: 1px solid var(--vscode-panel-border); border-radius: 0; background: transparent; text-align: left; font-size: 10px; color: var(--vscode-descriptionForeground); }
+
+.outside-comments { position: absolute; z-index: 4; left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 4px 10px; border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border)); border-radius: 12px; background: var(--vscode-editorWidget-background); color: var(--vscode-textLink-foreground); box-shadow: 0 2px 5px var(--vscode-widget-shadow); font-size: 11px; white-space: nowrap; }
+.outside-comments.above { top: 6px; }
+.outside-comments.below { bottom: 6px; }
+.outside-comments[hidden] { display: none; }

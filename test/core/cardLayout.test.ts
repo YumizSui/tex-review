@@ -1,4 +1,4 @@
-import { sourceLinkedCards, revealCommentCard } from '../../src/core/cardLayout';
+import { sourceLinkedCards, revealCommentCard, survivingCommentAnchor, offscreenCommentCards } from '../../src/core/cardLayout';
 import { alignCommentCard } from '../../src/core/cardLayout';
 import { describe,it,expect } from 'vitest';
 import { commentRailPosition, commentViewportAnchor, commentBottomPadding, layoutCards, layoutViewportCards } from '../../src/core/cardLayout';
@@ -149,5 +149,27 @@ describe('explicit thread reveal', () => {
   it('keeps an oversized thread header reachable and permits its own scrolling', () => {
     expect(revealCommentCard(0, 420, 800, 500)).toBe(410);
     expect(revealCommentCard(900, 420, 800, 500)).toBe(410);
+  });
+});
+
+
+describe('surviving and offscreen discussions', () => {
+  it('retains a surviving focused comment after preceding discussions are resolved', () => {
+    expect(survivingCommentAnchor(['a','b','c'], ['c'], 'c')).toBe('c');
+    expect(survivingCommentAnchor(['a','b','c'], ['a','c'], 'b')).toBe('c');
+    expect(survivingCommentAnchor(['a','b','c'], ['a'], 'c')).toBe('a');
+    expect(survivingCommentAnchor(['a'], [], 'a')).toBeNull();
+  });
+  it('exposes threads packed beyond both source scroll limits', () => {
+    const cards = [{id:'before',top:10,height:100},{id:'visible',top:500,height:300},{id:'after',top:1600,height:400}];
+    expect(offscreenCommentCards(cards,400,500)).toEqual({above:['before'],below:['after']});
+    expect(offscreenCommentCards(cards,1600,500)).toEqual({above:['before','visible'],below:[]});
+  });
+  it('reveals a remaining comment using its new packing after a dense group disappears', () => {
+    const old = sourceLinkedCards([{id:'a',anchor:20,height:500},{id:'b',anchor:20,height:500},{id:'c',anchor:20,height:100}], 'c');
+    const current = sourceLinkedCards([{id:'c',anchor:20,height:100}], 'c');
+    expect(old.origin).toBeLessThan(-1000); expect(current.origin).toBe(0);
+    const scroll = revealCommentCard(0-current.origin,current.paddingTop,100,600);
+    expect(offscreenCommentCards([{id:'c',top:current.paddingTop,height:100}],scroll,600)).toEqual({above:[],below:[]});
   });
 });

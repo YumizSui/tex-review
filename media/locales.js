@@ -1,4 +1,8 @@
 const ja = {
+  "{0} comment above": "上に{0}件",
+  "{0} comment below": "下に{0}件",
+  "{0} comments above": "上に{0}件",
+  "{0} comments below": "下に{0}件",
   "Filter comments": "コメントを絞り込む",
   "All types": "すべての種類",
   "Replies": "返信状況",
