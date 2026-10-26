@@ -56,3 +56,24 @@ it('contains a thread gesture at either boundary and lets reply fields chain onl
   time+=200;scroll(event(card,-200));expect(card.scrollTop).toBe(0);expect(outer.scrollTop).toBe(0);
   time+=20;scroll(event(card,20));expect(card.scrollTop).toBe(20);expect(outer.scrollTop).toBe(0);
 });
+
+
+it('links only actual outer-list movement, retaining independent thread scrolling', () => {
+  const container = (maximum: number) => {
+    let top = 0;
+    return {get scrollTop() {return top;}, set scrollTop(value: number) {top = Math.max(0, Math.min(maximum, value));}};
+  };
+  const outer = container(500), thread = container(100), source = container(200);
+  let time = 0;
+  const linked = vi.fn((delta: number) => {source.scrollTop += delta;});
+  const scroll = commentScrollHandler(outer, (target: any) => target, () => 20, () => time, (owner: any) => owner, linked);
+  const wheel = (target: any, deltaY: number) => ({target, deltaY, deltaX: 0, deltaMode: 0, ctrlKey: false, preventDefault: vi.fn()});
+  scroll(wheel(thread, 150));
+  expect(thread.scrollTop).toBe(100); expect(source.scrollTop).toBe(0); expect(linked).not.toHaveBeenCalled();
+  time += 200; scroll(wheel(null, 150));
+  expect(outer.scrollTop).toBe(150); expect(source.scrollTop).toBe(150);
+  time += 20; scroll(wheel(null, 500));
+  expect(outer.scrollTop).toBe(500); expect(source.scrollTop).toBe(200); expect(linked).toHaveBeenLastCalledWith(350);
+  time += 20; scroll(wheel(null, -50));
+  expect(outer.scrollTop).toBe(450); expect(source.scrollTop).toBe(150);
+});

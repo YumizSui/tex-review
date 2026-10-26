@@ -283,11 +283,8 @@ function initialize(msg) {
         }
         if (update.selectionSet) {
           forward();
-          const target = draftTarget;
-          if (!update.docChanged && target && cards.has('new') && update.state.selection.main.empty) {
-            // Wait until CodeMirror finishes its update before removing decorations.
-            queueMicrotask(() => { if (draftTarget === target && editor.state.selection.main.empty) cancelCompose(false); });
-          } else if (target) updateComposer();
+          // Keep the captured comment target while selecting other text to copy.
+          if (draftTarget) updateComposer();
         }
         if (update.docChanged) updateComparisonCount();
         if (update.geometryChanged || update.docChanged) commentLayoutDirty = true;
@@ -729,6 +726,17 @@ $('previousChange').addEventListener('click', () => { goToPreviousChunk(editor);
 $('refreshBaseline').addEventListener('click', () => send('refreshBaseline'));
 $('undoDelete').addEventListener('click', () => send('undoDelete'));
 $('dismissDelete').addEventListener('click', () => { $('deletionNotice').hidden = true; });
+function syncSourceFromComments(before, after) {
+  if (!editor || overview || Math.abs(after - before) < .5) return;
+  cancelCommentAlignment(); followSource = false;
+  editor.scrollDOM.scrollTop += after - before;
+  // Retain overflow at either source boundary so dense discussions remain reachable.
+  commentOffset = after - (editor.scrollDOM.scrollTop - commentOrigin);
+  lastLinkedSourceTop = editor.scrollDOM.scrollTop;
+  expectedRailScroll = after;
+  scheduleLayout(); saveState();
+}
+let draggingCommentRail = false;
 const scrollComments = commentScrollHandler(
   $('cards'),
   (target, event) => {
@@ -748,6 +756,7 @@ const scrollComments = commentScrollHandler(
       if (parent.scrollHeight > parent.clientHeight + 1 && /^(auto|scroll)$/.test(getComputedStyle(parent).overflowY)) return parent;
     return $('cards');
   },
+  delta => syncSourceFromComments($('cards').scrollTop - delta, $('cards').scrollTop),
 );
 $('comments').addEventListener('wheel', event => {
   cancelCommentAlignment(); followSource = false;
@@ -755,10 +764,19 @@ $('comments').addEventListener('wheel', event => {
 }, {passive:false});
 $('commentBody').addEventListener('pointerdown', event => {
   if (event.target.closest('.card,button,input,textarea,label,summary')) return;
-  if (cards.has('new')) cancelCompose(false);
   selectedThread = null; cancelCommentAlignment(); refreshDecorations(); scheduleLayout(); saveState();
 });
-$('cards').addEventListener('scroll', () => { if (expectedRailScroll === null || Math.abs($('cards').scrollTop-expectedRailScroll) > 1) commentOffset = $('cards').scrollTop - (editor.scrollDOM.scrollTop-commentOrigin); saveState(); }, {passive:true});
+$('cards').addEventListener('pointerdown', event => { draggingCommentRail = event.target === $('cards'); });
+window.addEventListener('pointerup', () => { draggingCommentRail = false; });
+window.addEventListener('pointercancel', () => { draggingCommentRail = false; });
+$('cards').addEventListener('scroll', () => {
+  const top = $('cards').scrollTop;
+  if (expectedRailScroll === null || Math.abs(top - expectedRailScroll) > 1) {
+    if (draggingCommentRail && expectedRailScroll !== null) syncSourceFromComments(expectedRailScroll, top);
+    else commentOffset = top - (editor.scrollDOM.scrollTop - commentOrigin);
+  }
+  expectedRailScroll = top; saveState();
+}, { passive: true });
 $('source').addEventListener('wheel', cancelCommentAlignment, {passive:true});
 $('roots').addEventListener('change', () => requestNavigation({ file: $('roots').value, root: $('roots').value, explicit: true }));
 $('selectPdf').addEventListener('click', () => send('selectPdf'));
