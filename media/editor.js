@@ -22,7 +22,7 @@ import { sourceLinkedCards, revealCommentCard } from '../src/core/cardLayout';
 const api = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
 const previous = api.getState() || {};
-let editor, version = 0, confirmed = '', inflight = null, restoring = false, conflictDraft = previous.conflictDraft || '';
+let editor, version = 0, documentGeneration = 0, confirmed = '', inflight = null, restoring = false, conflictDraft = previous.conflictDraft || '';
 let review = { active: null, reviews: [], threads: [], file: '' }, config = {}, draftTarget = null;
 let drafts = previous.drafts || {}, cards = new Map(), selectedThread = null, activeRange = null;
 let openNativeRequested = false, pendingNavigation = null, navigationSent = false, pendingThread = null;
@@ -55,7 +55,7 @@ const appearanceConfig = new Compartment();
 const comparisonConfig = new Compartment();
 const markerConfig = new Compartment(), highlights = StateEffect.define();
 const key = id => `${review.active || '(new)'}:${id === 'new' ? review.file + ':' : ''}${id}`;
-const send = (type, extra = {}) => api.postMessage({ type, file: review.file, ...extra });
+const send = (type, extra = {}) => api.postMessage({ type, file: review.file, generation: documentGeneration, ...extra });
 const timings = performanceMonitor(entry => send('performance', entry));
 timings.observe();
 const saveState = () => {
@@ -271,7 +271,7 @@ function initialize(msg) {
   pendingThread = msg.thread || null; navigationSent = false;
   conflictDraft = cached?.conflictDraft || (previous.file === msg.file ? previous.conflictDraft || '' : '');
   pendingChanges = ChangeSet.empty(msg.text.length);
-  version = msg.version; confirmed = msg.text; config = msg.config; review.file = msg.file; if (msg.active !== undefined) review.active = msg.active; pendingCompose = !!msg.selection?.compose || !!msg.compose;
+  version = msg.version; documentGeneration = msg.generation ?? 0; confirmed = msg.text; config = msg.config; review.file = msg.file; if (msg.active !== undefined) review.active = msg.active; pendingCompose = !!msg.selection?.compose || !!msg.compose;
   pdfjs.GlobalWorkerOptions.workerSrc = msg.worker;
   editor = new EditorView({ parent: $('source'), state: EditorState.create({ doc: msg.text,
     selection: msg.selection && Number.isFinite(msg.selection.from) ? { anchor: Math.min(msg.text.length, msg.selection.from), head: Math.min(msg.text.length, msg.selection.to ?? msg.selection.from) } : undefined,
@@ -349,12 +349,17 @@ function applyAppearance() {
 }
 function applyDocument(msg) {
   const local = editor.state.doc.toString();
-  const action = documentUpdate(msg, { version, confirmed, local, inflight });
+  const action = documentUpdate(msg, { version, confirmed, local, inflight, generation: documentGeneration });
   if (action === 'ignore') return;
   if (action === 'ack') {
-    confirmed = msg.text; version = msg.version; inflight = null;
+    confirmed = msg.text; version = msg.version; documentGeneration = msg.generation ?? 0; inflight = null;
     if (local !== confirmed) flush(); else { $('status').textContent = t('Changes applied'); acceptPendingReview(); finishComment(); finishSave(); finishNavigation(); }
     return;
+  }
+  if (action === 'refresh') {
+    version = msg.version; documentGeneration = msg.generation ?? 0; inflight = null;
+    pendingChanges = sourceChanges(sourceText(confirmed), editor.state.doc);
+    flush(); finishSave(); finishNavigation(); return;
   }
   if (action === 'conflict') {
     conflictDraft = local; pendingNavigation = null; navigationSent = false; pendingComment = null; commentPending = false; saveRequested = false; buildRequested = null; openNativeRequested = false; saveState();
@@ -363,7 +368,7 @@ function applyDocument(msg) {
   restoring = true;
   const changes = sourceChanges(editor.state.doc, sourceText(msg.text));
   editor.dispatch({ changes, annotations: Transaction.addToHistory.of(false) });
-  restoring = false; confirmed = msg.text; version = msg.version; inflight = null;
+  restoring = false; confirmed = msg.text; version = msg.version; documentGeneration = msg.generation ?? 0; inflight = null;
   pendingChanges = ChangeSet.empty(msg.text.length); acceptPendingReview();
   refreshDecorations();
 }

@@ -143,5 +143,6 @@
   "Change type…": "種類を変更…",
   "Compare with file…": "ファイルと比較…",
   "Select baseline file": "比較元のファイルを選択",
-  "Filter comments": "コメントを絞り込む"
+  "Filter comments": "コメントを絞り込む",
+  "Unable to save the source.": "本文を保存できませんでした。"
 }

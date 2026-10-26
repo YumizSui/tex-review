@@ -152,8 +152,9 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
     let syncGeneration = 0;
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     let lastReview = '';
+    let documentGeneration = 0;
     let lastSyntax: { syntax: Awaited<ReturnType<typeof workbenchSyntax>>; version: number } | undefined;
-    const post = (m: object) => { if (!disposed) void panel.webview.postMessage({ file, ...m }); };
+    const post = (m: object) => { if (!disposed) void panel.webview.postMessage({ file, generation: documentGeneration, ...m }); };
     const updateTitle = () => { panel.title = `${[...visited.values()].some(doc => doc.isDirty) ? '● ' : ''}TeX Review${/\.tex$/i.test(file) && this.selectedRoot ? ' · ' + path.basename(this.selectedRoot, '.tex') : ' · ' + path.basename(file)}`; };
     let scopeCache: { key: string; value: ReturnType<typeof projectSources> } | undefined;
     const isTex = () => /\.tex$/i.test(file);
@@ -183,6 +184,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
       ++syntaxGeneration; ++comparisonGeneration; ++syncGeneration;
       clearTimeout(sourceTimer); clearTimeout(syntaxTimer);
       sourceWatcher.dispose();
+      if (next !== document) ++documentGeneration;
       document = next; file = nextFile; this.sessionSource = file; visited.set(file, document);
       documentHistory.clear(); rememberDocument(); lastSyntax = undefined; lastComparison = ''; lastReview = '';
       this.service.updateDocument(file, document.getText(), undefined, document.isDirty);
@@ -286,8 +288,19 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
       post({type:'transaction',busy:this.service.transactionPending});
       if (!this.service.transactionPending && ready) { docState(); review(); scheduleSyntax(); }
     }));
+    const adoptDocument = (next: vscode.TextDocument) => {
+      if (next !== document && next.uri.toString() === document.uri.toString()) {
+        document = next; visited.set(file, next); ++documentGeneration;
+        documentHistory.clear(); lastSyntax = undefined; lastReview = ''; ++syntaxGeneration;
+      }
+    };
+    disposables.push(vscode.workspace.onDidOpenTextDocument(next => {
+      if (next.uri.toString() !== document.uri.toString()) return;
+      adoptDocument(next); rememberDocument();
+      if (ready && panel.visible && !this.service.transactionPending) { docState(); review(); scheduleSyntax(); }
+    }));
     const onChange = vscode.workspace.onDidChangeTextDocument(e => {
-      if (e.document.uri.toString() === document.uri.toString()) { rememberDocument(); updateTitle(); if (ready && panel.visible && !this.service.transactionPending) { if (!applying) { docState(); review(); } scheduleSyntax(); } }
+      if (e.document.uri.toString() === document.uri.toString()) { adoptDocument(e.document); rememberDocument(); updateTitle(); if (ready && panel.visible && !this.service.transactionPending) { if (!applying) { docState(); review(); } scheduleSyntax(); } }
     });
     disposables.push(onChange);
     // An exact, non-recursive watch is not subject to recursive watcher exclusions.
@@ -295,8 +308,10 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
       clearTimeout(sourceTimer);
       sourceTimer = setTimeout(() => {
         if (disposed || !ready || !panel.visible) return;
-        queue = queue.then(() => {
+        queue = queue.then(async () => {
           if (disposed || !panel.visible) return;
+          adoptDocument(await vscode.workspace.openTextDocument(document.uri));
+          if (disposed) return;
           this.service.updateDocument(file, document.getText(), undefined, document.isDirty);
           docState(); review(); scheduleSyntax();
         }).catch(error => post({ type: 'error', error: String(error) }));
@@ -328,6 +343,8 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
       activationTimer = setTimeout(() => {
         queue = queue.then(async () => {
           if (disposed || !panel.visible || !panel.active) return;
+          adoptDocument(await vscode.workspace.openTextDocument(document.uri));
+          if (disposed) return;
           this.service.updateDocument(file, document.getText(), undefined, document.isDirty);
           docState(); review(); pdfPath = this.findPdf(document); pdfState(); scheduleSyntax();
           await comparisonState();
@@ -533,7 +550,8 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
         }
         if (m.type === 'edit') {
           if (this.service.transactionPending) throw new Error('A source transaction is in progress.');
-          if (m.version !== document.version) { docState('conflict'); return; }
+          adoptDocument(await vscode.workspace.openTextDocument(document.uri));
+          if (m.version !== document.version || m.generation !== documentGeneration) { docState('conflict'); return; }
           const changes = ChangeSet.fromJSON(m.changes);
           if (changes.length !== normalizedText().length) throw new Error('Invalid edit revision');
           const edit = new vscode.WorkspaceEdit();
@@ -556,7 +574,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
         if (m.type === 'exportComments') {
           void exportComments().catch(e => post({ type: 'error', error: String(e.message ?? e) })); return;
         }
-        if (m.type === 'save') { await document.save(); updateTitle(); post({ type: 'savedDocument' }); return; }
+        if (m.type === 'save') { adoptDocument(await vscode.workspace.openTextDocument(document.uri)); if (!await document.save()) throw new Error(vscode.l10n.t('Unable to save the source.')); updateTitle(); post({ type: 'savedDocument' }); return; }
         if (m.type === 'undo' || m.type === 'redo') { await vscode.commands.executeCommand(m.type); return; }
         if (m.type === 'compareUnsaved' && typeof m.text === 'string') {
           const recovered = await vscode.workspace.openTextDocument({ content: m.text, language: document.languageId });
