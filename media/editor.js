@@ -514,10 +514,21 @@ function renderComments() {
       const current = locate(review.threads.find(item => item.id === thread.id) || thread);
       selectedThread = thread.id; layoutAnchor = thread.id; requestCommentAlignment(); editor.dispatch({ selection: { anchor: current.from, head: current.to }, effects: EditorView.scrollIntoView(current.from, { y: 'center' }) });
       refreshDecorations(); editor.focus(); forward();
-    }), button(thread.status === 'resolved' ? t('Reopen') : t('Resolve'), () => send(thread.status === 'resolved' ? 'reopen' : 'resolve', { thread: thread.id, review: review.active })),
-      button('…', () => send('threadActions', { thread: thread.id, review: review.active })));
-    head.lastElementChild.setAttribute('aria-label', t('Comment options'));
-    head.lastElementChild.title = t('Comment options');
+    }));
+    const resolved = thread.status === 'resolved';
+    const action = button('', () => send(resolved ? 'reopen' : 'resolve', { thread: thread.id, review: review.active }));
+    action.className = 'thread-action';
+    action.title = t(resolved ? 'Reopen' : 'Resolve');
+    action.setAttribute('aria-label', action.title);
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16'); svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS(svg.namespaceURI, 'path');
+    path.setAttribute('d', resolved ? 'M3 6h6a4 4 0 1 1-3.5 6 M3 6l3-3 M3 6l3 3' : 'M3 8l3 3 7-7');
+    svg.append(path); action.append(svg);
+    const more = button('…', () => send('threadActions', { thread: thread.id, review: review.active }));
+    more.className = 'thread-action'; more.title = t('Comment options');
+    more.setAttribute('aria-label', more.title);
+    head.append(action, more);
     card.append(head);
     const tags = make('div', undefined, 'thread-tags');
     tags.textContent = commentTags(thread.tags).map(tag => t(commentTagLabels[tag])).join(' · ');
