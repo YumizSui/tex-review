@@ -1,4 +1,4 @@
-import { commentTagLabels, commentTags, commentMatches, commentPreview } from '../src/core/commentFilters';
+import { commentTagIds, commentTagLabels, commentTags, commentMatches, commentPreview } from '../src/core/commentFilters';
 import { commentScrollHandler } from './commentScroll.js';
 import { performanceMonitor } from './performance.js';
 import { documentUpdate } from '../src/core/documentSync';
@@ -614,7 +614,7 @@ function updateComposer() {
   card.querySelector('strong').textContent = t('Comment on line {0}', editor.state.doc.lineAt(draftTarget.from).number);
   card.querySelector('.quote').textContent = draftTarget.snapshot.slice(0, 180);
   const types = card.querySelector('.composer-type');
-  if (types) types.textContent = commentTags(draftTarget.tags).map(tag=>t(commentTagLabels[tag])).join(' · ');
+  if (types) types.value = commentTags(draftTarget.tags)[0];
   const update = card.querySelector('.composer-update-selection'), current = snapshotSelection();
   if (update) update.hidden = draftTarget.status === 'attached' && current.from === draftTarget.from && current.to === draftTarget.to && current.snapshot === draftTarget.snapshot;
 }
@@ -626,9 +626,14 @@ function compose() {
   const card = make('article', undefined, 'card composer'); card.dataset.thread = 'new'; commentLayoutDirty = true;
   const heading = make('div',undefined,'composer-heading'); heading.append(make('strong', t('Comment on line {0}', draftTarget.range.startLine))); card.append(heading);
   const quote = make('p', draftTarget.snapshot.slice(0, 180), 'quote'); card.append(quote);
-  const composer = crypto.randomUUID(); card.dataset.composer = composer;
-  const type = button(t('Action required'),()=>send('chooseComposerType',{composer,tags:commentTags(draftTarget.tags)}));
-  type.className = 'composer-type'; type.title = t('Comment type'); type.setAttribute('aria-label',t('Comment type')); card.append(type);
+  const type = make('select');
+  type.className = 'composer-type'; type.title = t('Comment type'); type.setAttribute('aria-label',t('Comment type'));
+  for (const tag of commentTagIds) { const option = make('option',t(commentTagLabels[tag])); option.value = tag; type.append(option); }
+  type.addEventListener('change',()=>{
+    if (!draftTarget) return;
+    draftTarget.tags = [type.value]; saveState(); card.querySelector('textarea').focus({preventScroll:true});
+  });
+  card.append(type);
   const input = make('textarea'); input.rows = 3; input.placeholder = t('Write a comment…'); input.setAttribute('aria-label', t('Write a comment…')); input.value = drafts[key('new')] || '';
   input.addEventListener('input', () => { drafts[key('new')] = input.value; saveState(); });
   const submit = () => {
@@ -826,10 +831,6 @@ window.addEventListener('message', event => timings.measure(`message.${event.dat
     const length = editor.state.doc.length;
     editor.dispatch({ selection: { anchor: Math.min(length, m.from), head: Math.min(length, m.to) }, effects: EditorView.scrollIntoView(Math.min(length, m.from), { y: 'center' }) });
     if (m.compose) compose(); else editor.focus();
-  }
-  else if (m.type === 'composerType') {
-    const card=cards.get('new')?.element;
-    if (draftTarget && card?.dataset.composer === m.composer) { draftTarget.tags = m.tags; updateComposer(); saveState(); card.querySelector('textarea').focus({preventScroll:true}); }
   }
   else if (m.type === 'tagFilter') { tagFilter = m.tags; updateTagFilter(); renderComments(); saveState(); }
   else if (m.type === 'linkCopied') $('status').textContent = t('Comment link copied');

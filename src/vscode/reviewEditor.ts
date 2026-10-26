@@ -434,14 +434,6 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
           if (this.pendingOpen) { post(this.pendingOpen); this.pendingOpen = undefined; }
           return;
         }
-        if (m.type === 'chooseComposerType') {
-          void (async () => {
-            const picked = await vscode.window.showQuickPick(commentTagIds.map(tag => ({label:(commentTags(m.tags).includes(tag)?'$(check) ':'')+vscode.l10n.t(commentTagLabels[tag]),tag})),
-              {title:vscode.l10n.t('Comment type')});
-            if (picked && !disposed) post({type:'composerType',composer:m.composer,file:m.file,tags:[picked.tag]});
-          })().catch(error=>post({type:'error',error:String(error.message || error)}));
-          return;
-        }
         if (m.type === 'chooseTagFilter') {
           void (async () => {
             const picked = await vscode.window.showQuickPick(commentTagIds.map(tag => ({label:vscode.l10n.t(commentTagLabels[tag]), tag,
