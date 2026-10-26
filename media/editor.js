@@ -21,6 +21,13 @@ import { sourceLinkedCards, revealCommentCard, survivingCommentAnchor, offscreen
 
 const api = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
+// A retained webview may reload newer assets before its host regenerates HTML.
+// Upgrade the previous card container before restoring state or accepting input.
+if (!$('commentLayout')) {
+  const layout = document.createElement('div'); layout.id = 'commentLayout';
+  while ($('cards').firstChild) layout.append($('cards').firstChild);
+  $('cards').append(layout);
+}
 const previous = api.getState() || {};
 let editor, version = 0, documentGeneration = 0, confirmed = '', inflight = null, restoring = false, conflictDraft = previous.conflictDraft || '';
 let review = { active: null, reviews: [], threads: [], file: '' }, config = {}, draftTarget = null;
@@ -342,7 +349,7 @@ function initialize(msg) {
   else if (!cached && previous.file === msg.file && previous.scrollTop && !msg.selection) editor.scrollDOM.scrollTop = previous.scrollTop;
   if (conflictDraft && conflictDraft !== msg.text) send('compareUnsaved', { text: conflictDraft });
   else if (conflictDraft) { conflictDraft = ''; saveState(); }
-  editor.focus(); forward();
+  editor.focus(); forward(); finishNavigation();
 }
 
 function applyAppearance() {
@@ -428,8 +435,8 @@ function navigateComment(direction) {
   if (threads[at]) jumpThread(threads[at]);
 }
 function requestNavigation(request) {
-  if (navigationSent) return;
-  pendingNavigation = request; flush(); finishNavigation();
+  pendingNavigation = request;
+  if (!navigationSent) { flush(); finishNavigation(); }
 }
 function finishNavigation() {
   if (!pendingNavigation || navigationSent || !editor || composing || inflight !== null || commentPending || pendingComment || saveRequested || buildRequested !== null || editor.state.doc.toString() !== confirmed) return;
