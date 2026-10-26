@@ -80,3 +80,13 @@ export function sourceLinkedCards(cards: CardMeasure[], focusedId: string | null
   return { origin, paddingTop: (tops[0] ?? gap) - origin,
     gaps: tops.map((top, i) => i ? top - tops[i - 1] - cards[i - 1].height : 0) };
 }
+
+
+/** Reveal an explicitly opened thread, keeping its header and body inside the pane.
+ * Preserve source alignment whenever the card already fits. */
+export function revealCommentCard(scrollTop: number, cardTop: number, cardHeight: number, viewportHeight: number, inset = 10): number {
+  const readableHeight = Math.min(cardHeight, Math.max(0, viewportHeight - inset * 2));
+  const minimum = Math.max(0, cardTop + readableHeight + inset - viewportHeight);
+  const maximum = Math.max(minimum, cardTop - inset);
+  return Math.max(minimum, Math.min(maximum, scrollTop));
+}

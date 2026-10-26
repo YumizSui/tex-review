@@ -17,7 +17,7 @@ import * as pdfjs from 'pdfjs-dist';
 import { anchor } from '../src/core/anchor';
 import { commentHighlights } from '../src/core/commentHighlights';
 import { projectComments } from '../src/core/projectComments';
-import { sourceLinkedCards } from '../src/core/cardLayout';
+import { sourceLinkedCards, revealCommentCard } from '../src/core/cardLayout';
 
 const api = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
@@ -154,7 +154,16 @@ function applyLayout(result) {
   commentOrigin = result.origin;
   const baseline = result.sourceTop - commentOrigin;
   if (resetCommentList && result.items.length) { rail.scrollTop = result.items[0].element.offsetTop-10; commentOffset = rail.scrollTop-baseline; resetCommentList = false; }
-  else if (alignComment) { commentOffset = 0; rail.scrollTop = Math.max(0,baseline); }
+  else if (alignComment) {
+    let top = result.paddingTop, target;
+    for (let i = 0; i < result.items.length; i++) {
+      top += result.gaps[i];
+      if (result.items[i].id === selectedThread) { target = {top, height: result.items[i].height}; break; }
+      top += result.items[i].height;
+    }
+    rail.scrollTop = target ? revealCommentCard(Math.max(0, baseline), target.top, target.height, result.height) : Math.max(0, baseline);
+    commentOffset = rail.scrollTop - baseline;
+  }
   else if (followSource || lastLinkedSourceTop !== null && Math.abs(result.sourceTop-lastLinkedSourceTop) > .5) rail.scrollTop = Math.max(0,baseline+commentOffset);
   else { rail.scrollTop = before; commentOffset = rail.scrollTop-baseline; }
   lastLinkedSourceTop = result.sourceTop; expectedRailScroll = rail.scrollTop;
@@ -446,7 +455,7 @@ function renderOverview() {
     const entry = button(undefined, () => { overview = false; jumpThread(thread); renderOverview(); scheduleLayout(); saveState(); });
     entry.className = 'overview-comment' + (selectedThread === thread.id ? ' active' : '');
     entry.setAttribute('aria-current', String(selectedThread === thread.id));
-    entry.append(make('small', t('Line {0}', thread.range.startLine)), make('span', commentPreview(thread, commentQuery)));
+    entry.append(make('small', `${t('Line {0}', thread.range.startLine)} · ${commentTags(thread.tags).map(tag => t(commentTagLabels[tag])).join(' · ')}`), make('span', commentPreview(thread, commentQuery)));
     group.append(entry);
   }
   list.scrollTop = scrollTop;

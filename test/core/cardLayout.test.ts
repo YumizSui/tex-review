@@ -1,4 +1,4 @@
-import { sourceLinkedCards } from '../../src/core/cardLayout';
+import { sourceLinkedCards, revealCommentCard } from '../../src/core/cardLayout';
 import { alignCommentCard } from '../../src/core/cardLayout';
 import { describe,it,expect } from 'vitest';
 import { commentRailPosition, commentViewportAnchor, commentBottomPadding, layoutCards, layoutViewportCards } from '../../src/core/cardLayout';
@@ -135,5 +135,19 @@ describe('source-linked comment rail', () => {
     // At source scrollTop=0 the focused card is at y=10; rail scrollTop=0
     // still exposes the first card when the reader scrolls the comments upward.
     expect(result.paddingTop+100+10+100+10+result.origin).toBe(10);
+  });
+});
+
+
+describe('explicit thread reveal', () => {
+  it('keeps an already visible card aligned with its source', () => {
+    expect(revealCommentCard(200, 300, 180, 500)).toBe(200);
+  });
+  it('reveals a long card anchored near the bottom of a short document', () => {
+    expect(revealCommentCard(0, 420, 240, 500)).toBe(170);
+  });
+  it('keeps an oversized thread header reachable and permits its own scrolling', () => {
+    expect(revealCommentCard(0, 420, 800, 500)).toBe(410);
+    expect(revealCommentCard(900, 420, 800, 500)).toBe(410);
   });
 });
