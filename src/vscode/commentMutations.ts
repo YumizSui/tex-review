@@ -13,7 +13,6 @@ export class CommentMutations {
     validateCommentMutation(request);
     validateReviewName(request.review);
     workspaceFile(this.root, request.file);
-    if (!request.file.endsWith('.tex')) throw new Error('Only workspace TeX sources are supported.');
     const digest = sourceRevision(JSON.stringify(request));
     const dir = path.join(this.root,'.review');
     if (!this.service.list().includes(request.review)) throw new Error('Review not found.');

@@ -9,8 +9,8 @@ import {CommentMutation} from '../../src/core/commentMutation';
 import {readLog} from '../../src/core/storage';
 
 describe('comment API mutations',()=>{
- async function fixture(){
-  const root=fs.mkdtempSync(path.join(os.tmpdir(),'tr-comment-')),dir=path.join(root,'.review'),file='a.tex',text='日本語の本文。\n';
+ async function fixture(file = 'a.tex'){
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'tr-comment-')),dir=path.join(root,'.review'),text='日本語の本文。\n';
   fs.writeFileSync(path.join(root,file),text);
   const service=new ReviewService(dir);service.createReview('review');
   service.updateDocument(file,text);service.apply({op:'add_thread',id:'t_one',file,range:{startLine:1,endLine:1},snapshot:text.trim(),body:'元のコメント',author:'reviewer',ts:'2026-10-26T00:00:00Z'});
@@ -20,8 +20,8 @@ describe('comment API mutations',()=>{
   const request:CommentMutation={id:'comment_request_01',file,review:'review',thread:'t_one',reviewRevision:read.reviewRevision,action:'reply',body:'修正しました。😀'};
   return {root,dir,file,text,service,sources,api,access,request,original};
  }
- it('appends one UTF-8 reply, preserves source/anchors, and retries once after restart',async()=>{
-  const f=await fixture();await f.api.mutate(f.request);
+ it.each(['a.tex','notes.txt','README.md'])('replies to %s with UTF-8, preserves source/anchors, and retries once after restart',async(file)=>{
+  const f=await fixture(file);await f.api.mutate(f.request);
   const service=new ReviewService(f.dir),sources=new SourceTransactions(f.root,service,f.access),restarted=new CommentMutations(f.root,service,sources);
   expect(await restarted.mutate(f.request)).toMatchObject({committed:true});
   const thread=service.view('review').threads[0];expect(thread.comments).toHaveLength(2);expect(thread.comments[1]).toMatchObject({body:f.request.body,author:'agent'});
