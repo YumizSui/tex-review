@@ -140,5 +140,7 @@
   "Review not found.": "Review not found.",
   "Comment type": "Comment type",
   "Filter comments by type": "Filter comments by type",
-  "Change type…": "Change type…"
+  "Change type…": "Change type…",
+  "Compare with file…": "Compare with file…",
+  "Select baseline file": "Select baseline file"
 }

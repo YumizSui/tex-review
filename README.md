@@ -13,9 +13,10 @@ anchored to the source text.
 
 - One manuscript tab for TeX source, threaded comments, and PDF preview.
 - A comment list grouped by source file, with search, comment types, and navigation across included TeX files.
+- Text and Markdown files reviewed without the PDF pane.
 - Stable local links to individual comment threads.
 - PDF builds and bidirectional source–PDF navigation through SyncTeX.
-- Comparison against a Git commit or another TeX file.
+- Comparison against a Git commit or another file.
 - Comments and replies exported as PDF annotations.
 - Review files that AI coding assistants can read and answer.
 
@@ -42,7 +43,7 @@ required for comparisons against a commit.
 
 ## Use
 
-Open a `.tex` file with **TeX Review: Open review editor**. Select a passage and
+Open a `.tex`, `.txt`, or `.md` file with **TeX Review: Open review editor**. Select a passage and
 press **⌘⌥M** (macOS) or **Ctrl+Alt+M** (Windows/Linux) to add a comment.
 
 AI assistants can change reviewed text and its comment destinations together

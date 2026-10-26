@@ -58,7 +58,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
 
   async open(compose = false): Promise<void> {
     const editor = vscode.window.activeTextEditor;
-    if (!editor || editor.document.uri.scheme !== 'file' || !/\.tex$/i.test(editor.document.uri.fsPath)) {
+    if (!editor || editor.document.uri.scheme !== 'file') {
       if (this.session) { this.session.reveal(); return; }
       const last = this.context.workspaceState.get<string>('texReview.source');
       const root = last || this.selectedRoot || projectTargets(this.folder.uri.fsPath)[0]?.root;
@@ -154,9 +154,11 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
     let lastReview = '';
     let lastSyntax: { syntax: Awaited<ReturnType<typeof workbenchSyntax>>; version: number } | undefined;
     const post = (m: object) => { if (!disposed) void panel.webview.postMessage({ file, ...m }); };
-    const updateTitle = () => { panel.title = `${[...visited.values()].some(doc => doc.isDirty) ? '● ' : ''}TeX Review${this.selectedRoot ? ' · ' + path.basename(this.selectedRoot, '.tex') : ''}`; };
+    const updateTitle = () => { panel.title = `${[...visited.values()].some(doc => doc.isDirty) ? '● ' : ''}TeX Review${/\.tex$/i.test(file) && this.selectedRoot ? ' · ' + path.basename(this.selectedRoot, '.tex') : ' · ' + path.basename(file)}`; };
     let scopeCache: { key: string; value: ReturnType<typeof projectSources> } | undefined;
+    const isTex = () => /\.tex$/i.test(file);
     const sourceScope = () => {
+      if (!isTex()) return { files: [file], origin: 'references' as const };
       const record = pdfPath?.replace(/\.pdf$/i, '.fls');
       let stamp = 0; try { stamp = fs.statSync(record || '').mtimeMs; } catch {}
       const key = `${this.selectedRoot || file}:${pdfPath}:${stamp}`;
@@ -176,7 +178,6 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
     };
     const switchSource = async (nextFile: string, selection?: object, thread?: string) => {
       const target = workspaceFile(root, nextFile);
-      if (!/\.tex$/i.test(target)) throw new Error('Not a TeX source.');
       const next = await vscode.workspace.openTextDocument(vscode.Uri.file(target));
       if (disposed) return;
       ++syntaxGeneration; ++comparisonGeneration; ++syncGeneration;
@@ -187,15 +188,16 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
       this.service.updateDocument(file, document.getText(), undefined, document.isDirty);
       sourceWatcher = watchSource();
       await this.context.workspaceState.update('texReview.source', file);
-      postSource('source', selection, thread); review(); scheduleSyntax(); await comparisonState(); updateTitle();
+      pdfPath = this.findPdf(document);
+      postSource('source', selection, thread); review(); pdfState(); scheduleSyntax(); await comparisonState(); updateTitle();
     };
     const syntaxState = async () => {
       if (!activeTheme || disposed || !panel.visible) return;
       const generation = ++syntaxGeneration, version = document.version, text = document.getText();
       try {
-        const themeKey = JSON.stringify(activeTheme);
+        const themeKey = JSON.stringify([activeTheme, document.languageId]);
         if (this.nativeSyntaxTheme !== themeKey) { this.nativeSyntax = undefined; this.nativeSyntaxTheme = themeKey; }
-        this.nativeSyntax ??= workbenchSyntax(this.context.extensionUri.fsPath, activeTheme);
+        this.nativeSyntax ??= workbenchSyntax(this.context.extensionUri.fsPath, activeTheme, document.languageId);
         const syntax = await this.nativeSyntax;
         if (generation !== syntaxGeneration || document.version !== version || disposed) return;
         if (lastSyntax?.syntax === syntax && lastSyntax.version === version) return;
@@ -243,8 +245,8 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
         try { baseline = await checkpoint(root, ref); }
         catch { throw new Error(vscode.l10n.t('The checkpoint could not be found.')); }
       } else {
-        const selected = await vscode.window.showOpenDialog({ canSelectMany: false, filters: { TeX: ['tex'] },
-          title: vscode.l10n.t('Select baseline TeX file'), defaultUri: this.folder.uri });
+        const selected = await vscode.window.showOpenDialog({ canSelectMany: false, filters: isTex() ? { TeX: ['tex'] } : undefined,
+          title: vscode.l10n.t('Select baseline file'), defaultUri: this.folder.uri });
         if (!selected?.[0]) return;
         if (fs.realpathSync(selected[0].fsPath) === fs.realpathSync(document.uri.fsPath)) throw new Error(vscode.l10n.t('Select a different file as the baseline.'));
         baseline = { kind: 'file', path: selected[0].fsPath, source: file, label: path.basename(selected[0].fsPath) };
@@ -259,7 +261,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
     const config = () => {
       const cfg = vscode.workspace.getConfiguration('texReview');
       const editor = vscode.workspace.getConfiguration('editor', document);
-      return { buildMode: cfg.get('buildMode', 'preview'), pdfSync: cfg.get('pdfSync', 'manual'), markerSide: cfg.get('markerSide', 'left'), includePdfComments: cfg.get('includePdfComments', false),
+      return { pdfEnabled: isTex(), buildMode: cfg.get('buildMode', 'preview'), pdfSync: cfg.get('pdfSync', 'manual'), markerSide: cfg.get('markerSide', 'left'), includePdfComments: cfg.get('includePdfComments', false),
         fontSize: editor.get('fontSize', 14), fontFamily: editor.get('fontFamily', 'monospace'),
         lineHeight: editor.get('lineHeight', 0), letterSpacing: editor.get('letterSpacing', 0), fontLigatures: editor.get('fontLigatures', false),
         cursorStyle: editor.get('cursorStyle', 'line'), cursorWidth: editor.get('cursorWidth', 0), cursorBlinking: editor.get('cursorBlinking', 'blink'),
@@ -276,7 +278,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
     };
     const docState = (kind = 'document') => !this.service.transactionPending && post({ type: kind, text: normalizedText().toString(), version: document.version });
     const pdfState = () => post({ type: 'pdf', uri: pdfPath ? panel.webview.asWebviewUri(vscode.Uri.file(pdfPath)).toString() + '?v=' + fs.statSync(pdfPath).mtimeMs : null,
-      name: pdfPath ? path.relative(root, pdfPath) : null, roots: projectTargets(root).map(t => t.root), selectedRoot: this.selectedRoot });
+      name: pdfPath ? path.relative(root, pdfPath) : null, roots: isTex() ? projectTargets(root).map(t => t.root) : [], selectedRoot: isTex() ? this.selectedRoot : undefined });
     disposables.push(this.targetChanged.event(() => { pdfPath = this.findPdf(document); pdfState(); review(); updateTitle(); }));
     panel.webview.options = { enableScripts: true, localResourceRoots: [this.folder.uri, vscode.Uri.joinPath(this.context.extensionUri, 'media')] };
     panel.webview.html = this.html(panel.webview);
@@ -484,13 +486,13 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
               ...(this.service.transactionPending ? [item('recoverTransaction', vscode.l10n.t('Recover AI edit'), 'sync')] : []),
               { label: '', kind: vscode.QuickPickItemKind.Separator },
               item('git', vscode.l10n.t('Compare with checkpoint…'), 'git-commit'),
-              item('file', vscode.l10n.t('Compare with TeX file…'), 'diff'),
-              item('fullBuild', vscode.l10n.t('Full build PDF'), 'build'),
-              item('export', vscode.l10n.t('Export PDF with comments…'), 'export'),
+              item('file', vscode.l10n.t('Compare with file…'), 'diff'),
+              ...(isTex() ? [item('fullBuild', vscode.l10n.t('Full build PDF'), 'build'),
+                item('export', vscode.l10n.t('Export PDF with comments…'), 'export')] : []),
               ...(pdfPath ? [item('reveal', process.platform === 'darwin' ? vscode.l10n.t('Reveal PDF in Finder') : vscode.l10n.t('Reveal PDF in File Explorer'), 'folder-opened')] : []),
               { label: '', kind: vscode.QuickPickItemKind.Separator },
               item('toggleComments', m.showComments ? vscode.l10n.t('Hide comments') : vscode.l10n.t('Show comments'), 'comment'),
-              item('togglePdf', m.showPdf ? vscode.l10n.t('Hide PDF') : vscode.l10n.t('Show PDF'), 'file-pdf'),
+              ...(isTex() ? [item('togglePdf', m.showPdf ? vscode.l10n.t('Hide PDF') : vscode.l10n.t('Show PDF'), 'file-pdf')] : []),
               item('openNative', vscode.l10n.t('Open in standard editor'), 'code'),
               item('settings', vscode.l10n.t('Settings…'), 'settings-gear'),
               item('performance', vscode.l10n.t('Show performance log'), 'output'),
@@ -686,6 +688,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
   }
 
   private findPdf(document: vscode.TextDocument): string | undefined {
+    if (!/\.tex$/i.test(document.uri.fsPath)) return undefined;
     const root = this.folder.uri.fsPath;
     const configured = vscode.workspace.getConfiguration('texReview').get<string>('pdfPath', '');
     const stem = path.basename(document.uri.fsPath, '.tex');

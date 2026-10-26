@@ -7,10 +7,10 @@ import { ReviewEditor } from '../../src/vscode/reviewEditor';
 import { ReviewService } from '../../src/vscode/reviewService';
 afterEach(() => vi.restoreAllMocks());
 describe('manuscript session entry points', () => {
-  it('reuses the session and transfers the selected text without opening another custom tab', async () => {
+  it.each(['tex', 'txt', 'md'])('reuses the session and transfers selected %s text without another tab', async (extension) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tex-session-open-'));
-    fs.writeFileSync(path.join(root, 'chapter.tex'), '1234567890');
-    const uri = { scheme: 'file', fsPath: path.join(root, 'chapter.tex'), toString: () => 'file://' + path.join(root, 'chapter.tex') };
+    fs.writeFileSync(path.join(root, 'chapter.' + extension), '1234567890');
+    const uri = { scheme: 'file', fsPath: path.join(root, 'chapter.' + extension), toString: () => 'file://' + path.join(root, 'chapter.' + extension) };
     const editor = new ReviewEditor({ workspaceState: { get: () => undefined }, subscriptions: [] } as any,
       { uri: { fsPath: root } } as any, new ReviewService(path.join(root, '.review')));
     Object.assign(vscode.window, { activeTextEditor: { document: { uri, getText: () => '1234567890', offsetAt: (p: number) => p }, selection: { start: 2, end: 8 } } });
@@ -19,7 +19,7 @@ describe('manuscript session entry points', () => {
     const open = vi.spyOn(vscode.commands,'executeCommand');
     await editor.open(true);
     expect(reveal).toHaveBeenCalledOnce(); expect(open).not.toHaveBeenCalled();
-    expect(postMessage).toHaveBeenCalledWith({type:'requestNavigation',file:'chapter.tex',selection:{from:2,to:8,compose:true},explicit:true,root:undefined});
+    expect(postMessage).toHaveBeenCalledWith({type:'requestNavigation',file:'chapter.' + extension,selection:{from:2,to:8,compose:true},explicit:true,root:undefined});
     fs.rmSync(root,{recursive:true,force:true});
   });
   it('reveals an existing manuscript even when no native editor is active',async()=>{

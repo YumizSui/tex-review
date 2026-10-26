@@ -21,8 +21,11 @@ function initialize(context: vscode.ExtensionContext): void {
   const service = new ReviewService(path.join(folder.uri.fsPath, '.review'));
   trackSources(context, folder, service);
   let apiStarted = false;
-  const ensureApi = () => {
-    if (apiStarted || !(fs.existsSync(path.join(folder.uri.fsPath, '.review')) || projectTargets(folder.uri.fsPath).length || vscode.workspace.textDocuments.some(doc => doc.uri.fsPath.endsWith('.tex')))) return;
+  const ensureApi = (explicit = false) => {
+    if (apiStarted) return;
+    const hasReview = fs.existsSync(path.join(folder.uri.fsPath, '.review')) || projectTargets(folder.uri.fsPath).length > 0 ||
+      vscode.workspace.textDocuments.some(doc => /\.tex$/i.test(doc.uri.fsPath));
+    if (!explicit && !hasReview) return;
     apiStarted = true;
     void startSourceApi(context, folder, service).catch(error => { apiStarted = false; console.error('[TeX Review] Source API:', error); void vscode.window.showErrorMessage(`TeX Review: ${String(error)}`); });
   };
@@ -36,15 +39,17 @@ function initialize(context: vscode.ExtensionContext): void {
       await editor.openThread(target.review,target.thread);
     } catch(error) { void vscode.window.showErrorMessage(`TeX Review: ${String(error)}`); }
   }}));
-  context.subscriptions.push(vscode.window.registerCustomEditorProvider(ReviewEditor.viewType, editor,
+  context.subscriptions.push(vscode.window.registerCustomEditorProvider(ReviewEditor.viewType, {
+    resolveCustomTextEditor: (document, panel) => { ensureApi(true); return editor.resolveCustomTextEditor(document, panel); },
+  },
     { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false }));
-  context.subscriptions.push(vscode.window.registerWebviewPanelSerializer('texReview.session', { deserializeWebviewPanel: (panel, state) => editor.restore(panel, state) }));
+  context.subscriptions.push(vscode.window.registerWebviewPanelSerializer('texReview.session', { deserializeWebviewPanel: (panel, state) => { ensureApi(true); return editor.restore(panel, state); } }));
   const register = (id: string, fn: () => unknown) => context.subscriptions.push(
     vscode.commands.registerCommand(id, async () => {
       try { await fn(); } catch (err) { vscode.window.showErrorMessage(`TeX Review: ${String(err)}`); }
     }),
   );
-  register('texReview.open', () => editor.open());
-  register('texReview.addComment', () => editor.open(true));
+  register('texReview.open', () => { ensureApi(true); return editor.open(); });
+  register('texReview.addComment', () => { ensureApi(true); return editor.open(true); });
 }
 export function deactivate(): void {}

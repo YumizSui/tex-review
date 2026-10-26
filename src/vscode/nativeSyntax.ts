@@ -5,19 +5,20 @@ import { ActiveThemeIdentity, ThemeCandidate, selectActiveTheme } from '../core/
 import { IRawTheme } from 'vscode-textmate';
 import { createNativeSyntax, readTokenTheme } from '../core/nativeSyntax';
 
-export async function workbenchSyntax(extensionPath: string, active: ActiveThemeIdentity) {
+export async function workbenchSyntax(extensionPath: string, active: ActiveThemeIdentity, language = 'latex') {
   const grammars = new Map<string, string>();
   const themes: ThemeCandidate[] = [];
-  let latexScope = 'text.tex.latex';
+  let languageScope: string | undefined = language === 'latex' ? 'text.tex.latex' : undefined;
   for (const extension of vscode.extensions.all) {
     for (const grammar of extension.packageJSON.contributes?.grammars ?? []) {
       grammars.set(grammar.scopeName, path.resolve(extension.extensionPath, grammar.path));
-      if (grammar.language === 'latex') latexScope = grammar.scopeName;
+      if (grammar.language === language) languageScope = grammar.scopeName;
     }
     for (const theme of extension.packageJSON.contributes?.themes ?? []) {
       themes.push({ ...theme, file: path.resolve(extension.extensionPath, theme.path) });
     }
   }
+  if (!languageScope) return { tokenize: (_text: string) => ({ colors: [] as string[], ranges: [] as [number, number, number, number][] }) };
   const selected = selectActiveTheme(themes, active);
   if (!selected) throw new Error(`Active workbench theme was not found: ${active.id ?? active.name}`);
   const selectedTheme = selected.id ?? active.name ?? selected.label;
@@ -34,6 +35,6 @@ export async function workbenchSyntax(extensionPath: string, active: ActiveTheme
     for (const [key, scope] of Object.entries(scopes)) if (customization[key]) settings.push({ scope, settings: typeof customization[key] === 'string' ? { foreground: customization[key] } : customization[key] });
     settings.push(...(customization.textMateRules ?? []));
   }
-  console.info('[TeX Review] Active syntax theme:', selectedTheme, 'grammar:', grammars.get(latexScope));
-  return createNativeSyntax(fs.readFileSync(path.join(extensionPath, 'media/onig.wasm')), grammars, latexScope, { settings });
+  console.info('[TeX Review] Active syntax theme:', selectedTheme, 'grammar:', grammars.get(languageScope));
+  return createNativeSyntax(fs.readFileSync(path.join(extensionPath, 'media/onig.wasm')), grammars, languageScope, { settings });
 }

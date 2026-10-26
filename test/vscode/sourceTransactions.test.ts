@@ -8,27 +8,27 @@ import { readLog } from '../../src/core/storage';
 const roots: string[] = [];
 afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0))
     fs.rmSync(root, { recursive: true, force: true }); });
-async function fixture(two = false) {
+async function fixture(two = false, file = 'a.tex') {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tex-transaction-'));
     roots.push(root);
-    const source = path.join(root, 'a.tex');
+    const source = path.join(root, file);
     let text = 'before\nold target\nafter', dirty = false, version = 1;
     fs.writeFileSync(source, text);
     const service = new ReviewService(path.join(root, '.review'));
     for (const review of two ? ['one', 'two'] : ['one']) {
         service.createReview(review);
-        service.apply({ op: 'add_thread', id: 't1', file: 'a.tex', range: { startLine: 2, endLine: 2 }, snapshot: 'old target', author: 'reviewer', body: 'Please revise.', ts: '2026-10-25T00:00:00Z' }, review);
+        service.apply({ op: 'add_thread', id: 't1', file: file, range: { startLine: 2, endLine: 2 }, snapshot: 'old target', author: 'reviewer', body: 'Please revise.', ts: '2026-10-25T00:00:00Z' }, review);
     }
     const access: SourceAccess = { async read() { return { text, dirty, version }; }, async apply(_file, before, expected, edits) { if (text !== before || version !== expected)
             return false; for (const e of [...edits].reverse())
             text = text.slice(0, e.from) + e.text + text.slice(e.to); dirty = true; version++; return true; }, async save() { fs.writeFileSync(source, text); dirty = false; return true; } };
-    const engine = new SourceTransactions(root, service, access), read = await engine.read('a.tex');
-    const transaction = { id: 'transaction_test', file: 'a.tex', revision: read.revision, reviewRevision: read.reviewRevision, edits: [{ from: 7, to: 17, before: 'old target', text: 'new target with detail' }], anchors: read.threads.map(t => ({ review: t.review, thread: t.id, from: 7, to: 29, quote: 'new target with detail' })) };
+    const engine = new SourceTransactions(root, service, access), read = await engine.read(file);
+    const transaction = { id: 'transaction_test', file: file, revision: read.revision, reviewRevision: read.reviewRevision, edits: [{ from: 7, to: 17, before: 'old target', text: 'new target with detail' }], anchors: read.threads.map(t => ({ review: t.review, thread: t.id, from: 7, to: 29, quote: 'new target with detail' })) };
     return { root, source, service, engine, access, transaction };
 }
 describe('durable native source transactions', () => {
-    it('publishes new source and explicit anchors together, preserving original comments and quotes', async () => {
-        const f = await fixture(), old = fs.readFileSync(path.join(f.root, '.review/one.view.json'), 'utf8');
+    it.each(['a.tex', 'notes.txt', 'README.md'])('publishes %s source and explicit anchors together', async (file) => {
+        const f = await fixture(false, file), old = fs.readFileSync(path.join(f.root, '.review/one.view.json'), 'utf8');
         const save = f.access.save;
         vi.spyOn(f.access, 'save').mockImplementation(async (file) => { expect(f.service.transactionPending).toBe(true); f.service.refreshAll(); expect(fs.readFileSync(path.join(f.root, '.review/one.view.json'), 'utf8')).toBe(old); return save(file); });
         const result = await f.engine.transact(f.transaction);

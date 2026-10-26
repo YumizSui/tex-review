@@ -29,6 +29,8 @@ export class ReviewService {
   }
   constructor(private readonly dir: string) { this.anchors = new AnchorStore(dir); }
 
+  trackedFiles(): string[] { return this.anchors.files(); }
+
   updateDocument(file: string, text: string, changes?: ChangeSet, dirty = false): void {
     // Populate all review anchors against the old revision before mapping edits.
     for (const name of this.list()) this.view(name);

@@ -275,3 +275,6 @@ body.vscode-high-contrast, body.vscode-high-contrast-light { --tex-command: var(
 
 .vscode-light .composer-type, .vscode-high-contrast-light .composer-type { color-scheme:light; }
 .vscode-dark .composer-type, .vscode-high-contrast .composer-type { color-scheme:dark; }
+
+/* Non-TeX documents use the same review editor without PDF tools. */
+.text-only .icon-toggle:has(#showPdf) { display: none; }

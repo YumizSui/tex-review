@@ -1,7 +1,9 @@
 # Local source and comment API
 
+The same API supports `.txt` and Markdown (`.md`, `.markdown`) files, and other text files already opened in the review editor. Non-TeX files do not use PDF builds or SyncTeX.
+
 TeX Review provides a local API for AI coding assistants. A transaction changes
-one TeX source and assigns its affected comments to explicit destinations in the
+one text source and assigns its affected comments to explicit destinations in the
 resulting text. Original comments, replies, and quoted snapshots are preserved.
 Source transactions never resolve or delete a thread. Explicit comment operations
 can reply, change type, resolve, or reopen an existing thread.

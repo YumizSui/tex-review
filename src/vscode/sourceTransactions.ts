@@ -181,8 +181,8 @@ export class SourceTransactions {
         return { file, text, revision: sourceRevision(text), reviewRevision: reviewRevision(views, file), dirty: current.dirty,
             threads: views.flatMap(view => view.threads.filter(t => t.file === file).map(t => ({ review: view.name, ...t, currentQuote: t.anchor ? text.slice(t.anchor.from, t.anchor.to) : undefined }))) };
     }
-    private validateFile(file: string) { if (typeof file !== 'string' || !file.endsWith('.tex'))
-        throw new Error('Only workspace TeX sources are supported.'); workspaceFile(this.root, file); }
+    private validateFile(file: string) { if (typeof file !== 'string' || (!/\.(tex|txt|md|markdown)$/i.test(file) && !this.service.trackedFiles().includes(file)))
+        throw new Error('Only workspace text sources are supported.'); workspaceFile(this.root, file); }
     async transact(request: SourceTransaction) {
         this.validateFile(request.file);
         const digest = sourceRevision(JSON.stringify(request));

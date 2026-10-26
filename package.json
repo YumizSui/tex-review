@@ -136,6 +136,15 @@
         "selector": [
           {
             "filenamePattern": "*.tex"
+          },
+          {
+            "filenamePattern": "*.txt"
+          },
+          {
+            "filenamePattern": "*.md"
+          },
+          {
+            "filenamePattern": "*.markdown"
           }
         ],
         "priority": "option"

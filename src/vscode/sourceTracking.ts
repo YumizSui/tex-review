@@ -10,17 +10,29 @@ export function trackSources(context: vscode.ExtensionContext, folder: vscode.Wo
   const relative = (uri: vscode.Uri) => {
     if (uri.scheme !== 'file') return null;
     const file = path.relative(folder.uri.fsPath, uri.fsPath);
-    return !file || file.startsWith('..' + path.sep) || path.isAbsolute(file) || !file.endsWith('.tex') ? null : file;
+    return !file || file.startsWith('..' + path.sep) || path.isAbsolute(file) || (!/\.tex$/i.test(file) && !service.trackedFiles().includes(file)) ? null : file;
   };
   const report = (action: () => void) => { try { action(); } catch (error) { console.error('[TeX Review] Source tracking failed:', error); void vscode.window.showErrorMessage(`TeX Review: ${String(error)}`); } };
-  const refresh = () => { clearTimeout(timer); timer = setTimeout(() => report(() => service.refreshAll()), 150); };
+  // Watch only explicitly reviewed non-TeX files; never scan a workspace for text files.
+  const textWatchers = new Map<string, vscode.FileSystemWatcher>();
+  const watchReviewedText = () => {
+    for (const file of service.trackedFiles()) {
+      if (/\.tex$/i.test(file) || textWatchers.has(file)) continue;
+      const target = path.join(folder.uri.fsPath, file);
+      const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(path.dirname(target)), path.basename(target)));
+      const changed = () => report(() => service.syncDisk(file));
+      context.subscriptions.push(watcher, watcher.onDidChange(changed), watcher.onDidCreate(changed), watcher.onDidDelete(changed));
+      textWatchers.set(file, watcher);
+    }
+  };
+  const refresh = () => { clearTimeout(timer); timer = setTimeout(() => report(() => { service.refreshAll(); watchReviewedText(); }), 150); };
   const opened = (doc: vscode.TextDocument) => {
     const file = relative(doc.uri); if (!file) return;
     const text = doc.getText(); texts.set(doc.uri.toString(), text);
     service.updateDocument(file, text, undefined, doc.isDirty); refresh();
   };
   report(() => {
-    service.initializeAnchors();
+    service.initializeAnchors(); watchReviewedText();
     for (const doc of vscode.workspace.textDocuments) opened(doc);
     if (context.globalStorageUri) {
       const result = service.migrateLegacySnapshots(path.join(context.globalStorageUri.fsPath, 'legacy-sources'));
@@ -42,12 +54,12 @@ export function trackSources(context: vscode.ExtensionContext, folder: vscode.Wo
     })),
     vscode.workspace.onDidSaveTextDocument(doc => report(() => {
       const file = relative(doc.uri); if (!file) return;
-      service.updateDocument(file, doc.getText(), undefined, false); service.checkpoint(file); service.refreshAll();
+      service.updateDocument(file, doc.getText(), undefined, false); service.checkpoint(file); service.refreshAll(); watchReviewedText();
     })),
     vscode.workspace.onDidCloseTextDocument(doc => report(() => {
       const file = relative(doc.uri); if (!file) return;
       texts.delete(doc.uri.toString());
-      service.updateDocument(file, doc.getText(), undefined, false); service.syncDisk(file);
+      service.updateDocument(file, doc.getText(), undefined, false); service.syncDisk(file); watchReviewedText();
     })), { dispose() { clearTimeout(timer); } });
   const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, '**/*.tex'));
   const diskChanged = (uri: vscode.Uri) => report(() => { const file = relative(uri); if (file) service.syncDisk(file); });

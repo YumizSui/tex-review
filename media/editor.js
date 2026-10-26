@@ -208,7 +208,7 @@ function busyButton(id, busy, idleLabel, busyLabel) {
   element.setAttribute('aria-busy', String(busy)); element.setAttribute('aria-label', label); element.title = label;
 }
 function forward(force = false) {
-  if (!editor || (!force && config.pdfSync !== 'automatic')) return;
+  if (!editor || config.pdfEnabled === false || (!force && config.pdfSync !== 'automatic')) return;
   clearTimeout(syncTimer);
   const sync = () => {
     pendingPdfJump = null;
@@ -266,7 +266,7 @@ function initialize(msg) {
     selection: msg.selection && Number.isFinite(msg.selection.from) ? { anchor: Math.min(msg.text.length, msg.selection.from), head: Math.min(msg.text.length, msg.selection.to ?? msg.selection.from) } : undefined,
     extensions: [lineNumbers(), highlightActiveLine(), history(), highlightSelectionMatches(), search({ top: true, createPanel: createSearchPanel,
         scrollToMatch: range => EditorView.scrollIntoView(range, { y: 'center' }) }),
-      texParser, EditorView.lineWrapping,
+      config.pdfEnabled === false ? [] : texParser, EditorView.lineWrapping,
       keymap.of([{ key: 'Mod-Alt-m', run: () => { compose(); return true; } },
         { key: 'Mod-s', run: () => { requestSave(); return true; } },
         { key: 'Escape', run: () => { if (!cards.has('new')) return false; cancelCompose(); return true; } }, ...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
@@ -785,7 +785,10 @@ function setColumns() {
     $(toggleId).parentElement.title = text;
   }
   document.body.classList.toggle('no-comments', !$('showComments').checked);
-  document.body.classList.toggle('no-pdf', !$('showPdf').checked);
+  const textOnly = config.pdfEnabled === false;
+  $('showPdf').parentElement.hidden = textOnly;
+  document.body.classList.toggle('text-only', textOnly);
+  document.body.classList.toggle('no-pdf', textOnly || !$('showPdf').checked);
   editor?.requestMeasure(); scheduleLayout(); schedulePdf(); saveState();
 }
 for (const id of ['showComments', 'showPdf']) $(id).addEventListener('change', setColumns);
