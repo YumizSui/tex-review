@@ -124,7 +124,7 @@ label { white-space: nowrap; }
 .comment-reply small:not(.reply-label) { display: block; }
 
 /* Selected discussion and source share one accent, independent of keyboard focus. */
-.card.is-active { border-color: var(--vscode-editorWidget-border, var(--vscode-panel-border)); background: var(--review-card-background); box-shadow: inset 2px 0 var(--vscode-textLink-foreground), 0 2px 6px var(--vscode-widget-shadow); z-index: 2; }
+.card.is-active { border-color: var(--vscode-editorWidget-border, var(--vscode-panel-border)); background: var(--review-card-background); box-shadow: inset 2px 0 var(--review-type-color, var(--vscode-textLink-foreground)), 0 2px 6px var(--vscode-widget-shadow); z-index: 2; }
 .card-heading { flex-wrap: wrap; }
 .cm-review-selected { background: color-mix(in srgb, var(--vscode-focusBorder) 28%, transparent) !important; outline: 1px solid var(--vscode-focusBorder); border-bottom: 2px solid var(--vscode-focusBorder); border-radius: 2px; }
 
@@ -198,9 +198,9 @@ body.vscode-high-contrast, body.vscode-high-contrast-light { --tex-command: var(
 #pdfControls .build-mode { width: 70px; min-width: 60px; max-width: 80px; }
 
 .card { --review-card-background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); }
-.card.is-active { --review-card-background: color-mix(in srgb, var(--vscode-textLink-foreground) 5%, var(--vscode-editorWidget-background, var(--vscode-editor-background))); }
+.card.is-active { --review-card-background: color-mix(in srgb, var(--review-type-color, var(--vscode-textLink-foreground)) 7%, var(--vscode-editorWidget-background, var(--vscode-editor-background))); }
 .card-heading { position: sticky; top: -11px; z-index: 1; margin: -11px -11px 0; padding: 6px 11px; background: var(--review-card-background); box-shadow: 0 1px 0 var(--vscode-panel-border); }
-.card.is-active .card-heading { box-shadow: inset 2px 0 var(--vscode-textLink-foreground), 0 1px 0 var(--vscode-panel-border); }
+.card.is-active .card-heading { box-shadow: inset 2px 0 var(--review-type-color, var(--vscode-textLink-foreground)), 0 1px 0 var(--vscode-panel-border); }
 .card-heading .thread-action { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 4px; border-radius: 4px; color: var(--vscode-icon-foreground); cursor: pointer; font-size: 16px; }
 .card-heading .thread-action:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
 .thread-action svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
@@ -294,3 +294,17 @@ body.vscode-high-contrast, body.vscode-high-contrast-light { --tex-command: var(
 .outside-comments.above { top: 6px; }
 .outside-comments.below { bottom: 6px; }
 .outside-comments[hidden] { display: none; }
+
+/* Comment types share a restrained accent across the rail and source. */
+[data-comment-type] { --review-type-color: var(--vscode-textLink-foreground); }
+[data-comment-type="action"] { --review-type-color: var(--vscode-charts-orange, #b96516); }
+[data-comment-type="question"] { --review-type-color: var(--vscode-charts-blue, #2472c8); }
+[data-comment-type="todo"] { --review-type-color: var(--vscode-charts-purple, #8855b5); }
+.vscode-dark [data-comment-type="action"], .vscode-high-contrast [data-comment-type="action"] { --review-type-color: var(--vscode-charts-orange, #dba265); }
+.vscode-dark [data-comment-type="question"], .vscode-high-contrast [data-comment-type="question"] { --review-type-color: var(--vscode-charts-blue, #75beff); }
+.vscode-dark [data-comment-type="todo"], .vscode-high-contrast [data-comment-type="todo"] { --review-type-color: var(--vscode-charts-purple, #b790dd); }
+.thread-tags::before, .overview-comment small::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--review-type-color); vertical-align: .08em; }
+.composer-type { border-left: 3px solid var(--review-type-color); }
+.overview-comment.active { background: color-mix(in srgb, var(--review-type-color) 12%, var(--vscode-sideBar-background)); color: var(--vscode-foreground); box-shadow: inset 3px 0 var(--review-type-color); }
+.cm-review-selected[data-comment-type] { background: color-mix(in srgb, var(--review-type-color) 20%, transparent) !important; border-bottom: 2px solid var(--review-type-color); outline: none; }
+.vscode-high-contrast .card.is-active, .vscode-high-contrast-light .card.is-active { border-color: var(--review-type-color); }

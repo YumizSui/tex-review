@@ -216,8 +216,10 @@ function refreshDecorations() {
     .filter(t => !t.outdated && t.to > t.from)
     .map(t => ({ from: t.from, to: t.to, selected: t.id === selectedThread }));
   if (draftTarget?.to > draftTarget?.from) ranges.push({ from: draftTarget.from, to: draftTarget.to, selected: true });
+  const selectedType = commentTags(selectedThread === 'new' ? draftTarget?.tags : review.threads.find(thread => thread.id === selectedThread)?.tags)[0];
   editor.dispatch({ effects: highlights.of(Decoration.set(commentHighlights(ranges).map(range => Decoration.mark({
     class: range.selected ? 'cm-review-selected' : 'cm-review-mark',
+    attributes: range.selected ? { 'data-comment-type': selectedType } : {},
   }).range(range.from, range.to)), true)) });
   scheduleLayout();
 }
@@ -482,6 +484,7 @@ function renderOverview() {
     }
     const entry = button(undefined, () => { overview = false; jumpThread(thread); renderOverview(); scheduleLayout(); saveState(); });
     entry.className = 'overview-comment' + (selectedThread === thread.id ? ' active' : '');
+    entry.dataset.commentType = commentTags(thread.tags)[0];
     entry.setAttribute('aria-current', String(selectedThread === thread.id));
     entry.append(make('small', `${t('Line {0}', thread.range.startLine)} · ${commentTags(thread.tags).map(tag => t(commentTagLabels[tag])).join(' · ')}`), make('span', commentPreview(thread, commentQuery)));
     group.append(entry);
@@ -601,7 +604,7 @@ function renderComments() {
     const old = cards.get(thread.id), scrollTop = old?.element.scrollTop || 0, replySaved = old?.replySaved; const focus = document.activeElement?.dataset?.draft === key(thread.id);
     const selection = focus ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
     old?.element.remove();
-    const card = make('article', undefined, 'card'); card.dataset.thread = thread.id;
+    const card = make('article', undefined, 'card'); card.dataset.thread = thread.id; card.dataset.commentType = commentTags(thread.tags)[0];
     card.addEventListener('pointerdown', () => focusCard(thread.id));
     card.addEventListener('focusin', () => focusCard(thread.id));
     const head = make('div', undefined, 'card-heading');
@@ -725,6 +728,7 @@ function updateComposer() {
   card.querySelector('.quote').textContent = draftTarget.snapshot.slice(0, 180);
   const types = card.querySelector('.composer-type');
   if (types) types.value = commentTags(draftTarget.tags)[0];
+  card.dataset.commentType = commentTags(draftTarget.tags)[0];
   const update = card.querySelector('.composer-update-selection'), current = snapshotSelection();
   if (update) update.hidden = draftTarget.status === 'attached' && current.from === draftTarget.from && current.to === draftTarget.to && current.snapshot === draftTarget.snapshot;
 }
@@ -741,7 +745,7 @@ function compose() {
   for (const tag of commentTagIds) { const option = make('option',t(commentTagLabels[tag])); option.value = tag; type.append(option); }
   type.addEventListener('change',()=>{
     if (!draftTarget) return;
-    draftTarget.tags = [type.value]; saveState(); card.querySelector('textarea').focus({preventScroll:true});
+    draftTarget.tags = [type.value]; updateComposer(); refreshDecorations(); saveState(); card.querySelector('textarea').focus({preventScroll:true});
   });
   card.append(type);
   const input = make('textarea'); input.rows = 3; input.placeholder = t('Write a comment…'); input.setAttribute('aria-label', t('Write a comment…')); input.value = drafts[key('new')] || '';
