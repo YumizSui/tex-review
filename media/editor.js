@@ -975,6 +975,11 @@ window.addEventListener('message', event => timings.measure(`message.${event.dat
   else if (m.type === 'transaction') { editor.dispatch({effects:transactionConfig.reconfigure(EditorState.readOnly.of(!!m.busy))}); $('status').textContent = m.busy ? t('AI edit pending') : t('Changes applied'); }
   else if (m.type === 'syntax') {
     if (m.version !== version || inflight || editor.state.doc.toString() !== confirmed) return;
+    for (const type of ['action', 'question', 'todo']) {
+      const color = m.accents?.[type];
+      if (/^#[0-9a-f]{3,8}$/i.test(color || '')) document.body.style.setProperty(`--review-syntax-${type}`, color);
+      else document.body.style.removeProperty(`--review-syntax-${type}`);
+    }
     const marks = m.ranges.filter(([from, to]) => to > from && to <= editor.state.doc.length).map(([from, to, color, font]) => {
       const foreground = /^#[0-9a-f]{3,8}$/i.test(m.colors[color] || '') ? m.colors[color] : 'var(--vscode-editor-foreground)';
       return Decoration.mark({ attributes: { style: `color:${foreground};font-style:${font & 1 ? 'italic' : 'normal'};font-weight:${font & 2 ? 'bold' : 'normal'};text-decoration:${font & 4 ? 'underline' : 'none'}` } }).range(from, to);

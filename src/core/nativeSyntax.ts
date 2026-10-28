@@ -5,7 +5,7 @@ import { Registry, parseRawGrammar, IRawTheme, StateStack, INITIAL } from 'vscod
 import { loadWASM, OnigScanner, OnigString } from 'vscode-oniguruma';
 
 let oniguruma: Promise<void> | undefined;
-export interface SyntaxTokens { colors: string[]; ranges: [number, number, number, number][] }
+export interface SyntaxTokens { accents: Record<string, string>; colors: string[]; ranges: [number, number, number, number][] }
 export async function createNativeSyntax(wasm: Uint8Array, grammars: Map<string, string>, scope: string, theme: IRawTheme) {
   oniguruma ??= loadWASM(wasm);
   await oniguruma;
@@ -15,6 +15,18 @@ export async function createNativeSyntax(wasm: Uint8Array, grammars: Map<string,
   });
   const grammar = await registry.loadGrammar(scope);
   if (!grammar) throw new Error('LaTeX grammar is unavailable');
+  // Resolve semantic scopes through TextMate itself, including inherited theme
+  // rules and the user's tokenColorCustomizations. No extension-owned palette.
+  const paletteGrammar = await registry.addGrammar(parseRawGrammar(JSON.stringify({ scopeName: 'text.review.accents', patterns: [
+    { name: 'keyword', match: 'a' },
+    { name: 'entity.name.function', match: 'q' },
+    { name: 'comment', match: 't' },
+  ] }), 'review-accents.json'));
+  const accents: Record<string, string> = {};
+  for (const [type, probe] of Object.entries({ action: 'a', question: 'q', todo: 't' })) {
+    const metadata = paletteGrammar.tokenizeLine2(probe, INITIAL).tokens[1];
+    accents[type] = registry.getColorMap()[(metadata >>> 15) & 511];
+  }
   return {
     tokenize(text: string): SyntaxTokens {
       let stack: StateStack = INITIAL, offset = 0;
@@ -28,7 +40,7 @@ export async function createNativeSyntax(wasm: Uint8Array, grammars: Map<string,
         }
         stack = result.ruleStack; offset += line.length + 1;
       }
-      return { colors: registry.getColorMap(), ranges };
+      return { accents, colors: registry.getColorMap(), ranges };
     },
   };
 }

@@ -19,9 +19,12 @@ describe('native workbench syntax', () => {
         { scope: 'support.function', settings: { foreground: '#123456' } },
         { scope: 'comment', settings: { foreground: '#abcdef', fontStyle: 'italic' } },
         { scope: 'string', settings: { foreground: '#aabbcc' } },
+        { scope: 'keyword', settings: { foreground: '#654321' } },
+        { scope: 'entity.name.function', settings: { foreground: '#112233' } },
       ] });
       const text = '\\section{a\nb}\n% コメント';
       const tokens = syntax.tokenize(text);
+      expect(tokens.accents).toEqual({ action: '#654321', question: '#112233', todo: '#ABCDEF' });
       const colorAt = (offset: number) => tokens.colors[tokens.ranges.find(([from, to]) => from <= offset && to > offset)![2]];
       expect(colorAt(0)).toBe('#123456');
       expect(colorAt(text.indexOf('b}'))).toBe('#AABBCC');

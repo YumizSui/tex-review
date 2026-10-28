@@ -297,12 +297,9 @@ body.vscode-high-contrast, body.vscode-high-contrast-light { --tex-command: var(
 
 /* Comment types share a restrained accent across the rail and source. */
 [data-comment-type] { --review-type-color: var(--vscode-textLink-foreground); }
-[data-comment-type="action"] { --review-type-color: var(--vscode-charts-orange, #b96516); }
-[data-comment-type="question"] { --review-type-color: var(--vscode-charts-blue, #2472c8); }
-[data-comment-type="todo"] { --review-type-color: var(--vscode-charts-purple, #8855b5); }
-.vscode-dark [data-comment-type="action"], .vscode-high-contrast [data-comment-type="action"] { --review-type-color: var(--vscode-charts-orange, #dba265); }
-.vscode-dark [data-comment-type="question"], .vscode-high-contrast [data-comment-type="question"] { --review-type-color: var(--vscode-charts-blue, #75beff); }
-.vscode-dark [data-comment-type="todo"], .vscode-high-contrast [data-comment-type="todo"] { --review-type-color: var(--vscode-charts-purple, #b790dd); }
+[data-comment-type="action"] { --review-type-color: var(--review-syntax-action, var(--vscode-editor-foreground)); }
+[data-comment-type="question"] { --review-type-color: var(--review-syntax-question, var(--vscode-editor-foreground)); }
+[data-comment-type="todo"] { --review-type-color: var(--review-syntax-todo, var(--vscode-editor-foreground)); }
 .thread-tags::before, .overview-comment small::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--review-type-color); vertical-align: .08em; }
 .composer-type { border-left: 3px solid var(--review-type-color); }
 .overview-comment.active { background: color-mix(in srgb, var(--review-type-color) 12%, var(--vscode-sideBar-background)); color: var(--vscode-foreground); box-shadow: inset 3px 0 var(--review-type-color); }
