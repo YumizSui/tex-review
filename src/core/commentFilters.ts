@@ -21,8 +21,8 @@ export const commentReplyLabels: Record<CommentReplyFilter, string> = {
 const normalized = (text: string) => text.normalize('NFKC').toLowerCase();
 export function commentMatches(thread: Thread, query = '', tags: readonly string[] = [], replies: CommentReplyFilter = 'all'): boolean {
   if (replies !== 'all') {
-    // A later human reply starts a new turn, even if AI answered earlier.
-    const aiReplied = thread.comments.length > 1 && thread.comments.at(-1)?.author === 'agent';
+    // Include AI-authored openings; a later human reply starts a new turn.
+    const aiReplied = thread.comments.at(-1)?.author === 'agent';
     if (thread.status !== 'open' || (replies === 'ai-replied' ? !aiReplied : aiReplied)) return false;
   }
   if (tags.length && !commentTags(thread.tags).some(tag => tags.includes(tag))) return false;

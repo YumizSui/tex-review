@@ -42,10 +42,20 @@ describe('AI reply filters', () => {
   expect(commentMatches(thread([reply,{op:'resolve',thread:'t1',ts:event.ts}]), '', [], 'ai-replied')).toBe(false);
   expect(commentMatches(thread(), '', [], 'no-ai-reply')).toBe(true);
  });
- it('does not treat a human reply or an AI-authored opening comment as an AI reply', () => {
+ it('includes AI-authored openings and follows subsequent human and AI turns', () => {
   expect(commentMatches(thread([{...reply,author:'reviewer'}]), '', [], 'ai-replied')).toBe(false);
   const opening = fold('review', [{...event,author:'agent'}]).threads[0];
-  expect(commentMatches(opening, '', [], 'no-ai-reply')).toBe(true);
+  expect(commentMatches(opening, '', [], 'ai-replied')).toBe(true);
+  expect(commentMatches(opening, '', [], 'no-ai-reply')).toBe(false);
+  const human = {...reply,author:'reviewer'};
+  const waiting = fold('review', [{...event,author:'agent'},human]).threads[0];
+  expect(commentMatches(waiting, '', [], 'ai-replied')).toBe(false);
+  expect(commentMatches(waiting, '', [], 'no-ai-reply')).toBe(true);
+  const answered = fold('review', [{...event,author:'agent'},human,reply]).threads[0];
+  expect(commentMatches(answered, '', [], 'ai-replied')).toBe(true);
+  const removed = fold('review', [{...event,author:'agent'},human,{op:'delete_comment',comment:'t1.c2',ts:event.ts}]).threads[0];
+  expect(commentMatches(removed, '', [], 'ai-replied')).toBe(true);
+  expect(commentMatches({...opening,status:'resolved'}, '', [], 'ai-replied')).toBe(false);
  });
  it('treats a human follow-up as awaiting AI until AI answers again', () => {
   const human = {...reply, author:'reviewer', body:'Please also check the conclusion.'};

@@ -6,6 +6,7 @@ import {ReviewService} from '../../src/vscode/reviewService';
 import {SourceTransactions} from '../../src/vscode/sourceTransactions';
 import {CommentMutations} from '../../src/vscode/commentMutations';
 import {CommentMutation} from '../../src/core/commentMutation';
+import {commentMatches} from '../../src/core/commentFilters';
 import {readLog} from '../../src/core/storage';
 
 describe('comment API mutations',()=>{
@@ -42,6 +43,8 @@ describe('comment API mutations',()=>{
   const thread=(await sources.read(file)).threads.find(t=>t.id===result.thread)!;
   expect(thread).toMatchObject({snapshot:'日本語',currentQuote:'日本語',tags:['question'],status:'open',anchor:{revision:state.revision,from:0,to:3,status:'attached'},range:{startLine:1,endLine:1,startColumn:1,endColumn:4}});
   expect(thread.comments).toEqual([expect.objectContaining({author:'agent',body:request.body})]);
+  expect(commentMatches(thread,'',[],'ai-replied')).toBe(true);
+  expect(commentMatches(thread,'',[],'no-ai-reply')).toBe(false);
   expect(readLog(f.dir,'review')).toHaveLength(before+1);
   expect(f.access.apply).not.toHaveBeenCalled();expect(f.access.save).not.toHaveBeenCalled();
   expect(fs.readFileSync(path.join(f.root,file),'utf8')).toBe(f.text);
