@@ -1,12 +1,12 @@
 ---
 name: review-comments
-description: Read and resolve human code-review comments left by the TeX Review extension. Use when the user asks to address review comments, fix review feedback, or work the review file in .review/. Triggers on "address the review", "fix review comments", "resolve review threads".
+description: Create AI review comments and address human feedback through the TeX Review local API. Use when the user asks to leave review comments, fix review feedback, or work with .review/. Triggers on "address the review", "fix review comments", "resolve review threads".
 ---
 
 # Working Code Review Comments
 
 TeX Review stores reviewer comments in `.review/`. Use the installed local API
-for source edits, replies, status changes, and tags. Discover its CLI from
+for source edits, new comments, replies, status changes, and tags. Discover its CLI from
 `.review/api.json`. Never rewrite the log, `.view.json`, or anchor checkpoints,
 and do not bypass API validation with direct log appends.
 
@@ -61,6 +61,22 @@ Do not silently fall back to direct log writes. If a view may be stale, reopen
 the extension and read through the API; folding the log does not produce current
 checkpoint positions. Report the unavailable capability when it blocks work.
 
+## New comments
+
+Check for `comment.create` in `.review/api.json` capabilities. Read the source
+first; choose an existing review from `reviews` (`activeReview` is the current
+editor review). If none exists, create a review in the editor first. Send
+`comment` with `action: "create"`, `id`, `file`, `review`, both `revision` and
+`reviewRevision`, `from`, `to`, `quote`, `body`, and optional `tags`. Omit `thread`;
+the result supplies its stable ID. Follow the [API example](../../docs/AI_EDITING.md#new-comments).
+
+Use exact offsets and quote from the returned text, in LF-normalized UTF-16.
+Do not locate repeated passages by guessing or pass Python code-point indexes
+as UTF-16 offsets. The server sets author to `agent`, captures the anchor, and
+leaves the thread open. Use `dryRun` first, then commit and read back the new
+thread. Source edits and comment creation remain separate operations; read the
+new revision after any source transaction before creating a comment.
+
 ## Replies, status, and type
 
 Check `capabilities` in `.review/api.json` for `comment`. Use the CLI's `comment`
@@ -95,8 +111,8 @@ node /path/from/api.json/tex-review.mjs comment comment-request.json
 - Use JSON serialization for requests. Do not construct JSON by interpolating
   manuscript or comment text into shell commands.
 
-These operations target existing stable thread IDs. They do not create/delete
-threads, rewrite existing comments, move anchors, or resolve anything implicitly.
+Reply, status, and type operations target existing stable thread IDs. They do not
+delete threads, rewrite existing comments, move anchors, or resolve anything implicitly.
 Source editing and a later reply remain separate explicit operations; the source
 transaction is the unit that keeps text and destinations together.
 

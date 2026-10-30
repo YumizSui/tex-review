@@ -6,7 +6,7 @@ TeX Review provides a local API for AI coding assistants. A transaction changes
 one text source and assigns its affected comments to explicit destinations in the
 resulting text. Original comments, replies, and quoted snapshots are preserved.
 Source transactions never resolve or delete a thread. Explicit comment operations
-can reply, change type, resolve, or reopen an existing thread.
+can create an AI-authored thread, reply, change type, resolve, or reopen a thread.
 
 The extension must be running in a trusted workspace. Run the client from that
 workspace's root. `.review/api.json` contains the installed client's `cli` path;
@@ -25,7 +25,7 @@ a remote service. Keep `.review/` out of Git.
 ## Read
 
 `read` returns the current editor text, its `revision`, a `reviewRevision`, and
-comments from every review on that source. It includes current anchor offsets
+comments from every review on that source, plus `reviews` and `activeReview` for choosing an existing review even when the source has no comments. It includes current anchor offsets
 and `currentQuote`; `snapshot` remains the original quote. The editor buffer is
 authoritative. A transaction requires a clean buffer; existing unsaved edits
 must be saved or discarded first.
@@ -87,10 +87,41 @@ Each request performs one explicit action:
 
 | `action` | Additional fields | Result |
 | --- | --- | --- |
+| `create` | `revision`, `from`, `to`, `quote`, `body`; optional `tags` | Create an open thread as `agent`; returns its `thread` ID. |
 | `reply` | `body` | Append a reply as `agent`. |
 | `set_tags` | `tags`, e.g. `["question"]` | Set the thread's comment type. |
 | `resolve` | None | Mark the thread resolved. |
 | `reopen` | None | Mark the thread open. |
+
+### New comments
+
+Check for `comment.create` in the descriptor's `capabilities`. Choose an existing
+review from `read.reviews`; create a review in the editor first if none exists.
+Use `create` without a `thread` field:
+
+```json
+{
+  "id": "unique-create-request-001",
+  "file": "chapters/introduction.tex",
+  "review": "review-name",
+  "reviewRevision": "reviewRevision returned by read",
+  "action": "create",
+  "revision": "revision returned by read",
+  "from": 100,
+  "to": 112,
+  "quote": "exact target",
+  "body": "Could you clarify this statement?",
+  "tags": ["question"]
+}
+```
+
+Offsets are LF-normalized UTF-16 positions in the current buffer. Both revisions
+and the exact quote must match; duplicate passages are selected by offsets.
+`from` may equal `to` with an empty quote for a point comment. The server assigns
+the stable thread ID, `agent` author, timestamp, and attached anchor. Omitted
+`tags` defaults to `action`. New comments do not edit or save the source and may
+be attached to the current unsaved buffer. They use the same dry-run and durable
+retry behavior as other comment operations.
 
 The four comment types are `action`, `question`, `todo`, and `note`. The `tags`
 field retains its name for compatibility and accepts at most one type. An empty
@@ -107,7 +138,7 @@ digest are stored with the event, so retries remain idempotent after a restart.
 IDs are scoped to the review. A different request must use a new ID.
 
 A comment operation appends one event and does not edit or save the source,
-change anchors, rewrite original quotes, or modify existing comments. It can
+move existing anchors, rewrite original quotes, or modify existing comments. Creation captures a new anchor and its original quote. It can
 run while the editor has unsaved source changes. UI/API writers are serialized
 by the extension; independent direct log writers do not participate in that
 serialization. Use this API instead of writing the log directly.

@@ -178,7 +178,7 @@ export class SourceTransactions {
         const current = await this.access.read(file), text = sourceText(current.text).toString();
         this.service.updateDocument(file, text, undefined, current.dirty);
         const views = this.views();
-        return { file, text, revision: sourceRevision(text), reviewRevision: reviewRevision(views, file), dirty: current.dirty,
+        return { file, text, reviews: this.service.list(), activeReview: this.service.active(), revision: sourceRevision(text), reviewRevision: reviewRevision(views, file), dirty: current.dirty,
             threads: views.flatMap(view => view.threads.filter(t => t.file === file).map(t => ({ review: view.name, ...t, currentQuote: t.anchor ? text.slice(t.anchor.from, t.anchor.to) : undefined }))) };
     }
     private validateFile(file: string) { if (typeof file !== 'string' || (!/\.(tex|txt|md|markdown)$/i.test(file) && !this.service.trackedFiles().includes(file)))

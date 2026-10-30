@@ -30,6 +30,65 @@ describe('comment API mutations',()=>{
   expect(readLog(f.dir,'review')).toHaveLength(2);
   await expect(restarted.mutate({...f.request,body:'different'})).rejects.toThrow('different request');
  });
+ it.each(['a.tex','notes.txt','README.md'])('creates an AI thread on %s with exact anchors and durable retries',async(file)=>{
+  const f=await fixture(file),state=await f.sources.read(file);
+  const request:CommentMutation={id:'create_request_01',action:'create',file,review:'review',revision:state.revision,reviewRevision:state.reviewRevision,from:0,to:3,quote:'日本語',body:'この説明を確認してください。😀',tags:['question']};
+  const before=readLog(f.dir,'review').length;
+  expect(await f.api.mutate({...request,dryRun:true})).toMatchObject({validated:true,committed:false});
+  expect(readLog(f.dir,'review')).toHaveLength(before);
+  const result=await f.api.mutate(request);
+  const service=new ReviewService(f.dir),sources=new SourceTransactions(f.root,service,f.access),restarted=new CommentMutations(f.root,service,sources);
+  expect(await restarted.mutate(request)).toEqual(result);
+  const thread=(await sources.read(file)).threads.find(t=>t.id===result.thread)!;
+  expect(thread).toMatchObject({snapshot:'日本語',currentQuote:'日本語',tags:['question'],status:'open',anchor:{revision:state.revision,from:0,to:3,status:'attached'},range:{startLine:1,endLine:1,startColumn:1,endColumn:4}});
+  expect(thread.comments).toEqual([expect.objectContaining({author:'agent',body:request.body})]);
+  expect(readLog(f.dir,'review')).toHaveLength(before+1);
+  expect(f.access.apply).not.toHaveBeenCalled();expect(f.access.save).not.toHaveBeenCalled();
+  expect(fs.readFileSync(path.join(f.root,file),'utf8')).toBe(f.text);
+  await expect(restarted.mutate({...request,body:'different'})).rejects.toThrow('different request');
+ });
+ it('discovers an empty review and creates there without switching the active review',async()=>{
+  const f=await fixture();f.service.createReview('empty');f.service.setActive('review');
+  const state=await f.sources.read(f.file);
+  expect(state.reviews).toEqual(expect.arrayContaining(['review','empty']));expect(state.activeReview).toBe('review');
+  const result=await f.api.mutate({id:'create_empty_01',action:'create',file:f.file,review:'empty',revision:state.revision,reviewRevision:state.reviewRevision,from:0,to:3,quote:'日本語',body:'New review comment.'});
+  expect(f.service.view('empty').threads[0].id).toBe(result.thread);expect(f.service.active()).toBe('review');
+ });
+ it('rejects stale source, wrong quote, invalid offsets, tags and spoofing before creation',async()=>{
+  const f=await fixture(),state=await f.sources.read(f.file);
+  const request={id:'create_invalid_01',action:'create',file:f.file,review:'review',revision:state.revision,reviewRevision:state.reviewRevision,from:0,to:3,quote:'日本語',body:'Check this.'};
+  for(const change of [{revision:'0'.repeat(64)},{quote:'wrong'},{from:-1},{to:999},{from:0.5},{to:1,quote:3},{tags:['invalid']},{tags:['question','todo']},{author:'reviewer'},{thread:'chosen_by_client'},{body:''},{review:'missing'}]){
+   await expect(f.api.mutate({...request,...change} as any)).rejects.toThrow();
+   expect(readLog(f.dir,'review')).toHaveLength(1);
+  }
+  f.service.apply({op:'reply',thread:'t_one',body:'human update',author:'reviewer',ts:'now'});
+  await expect(f.api.mutate(request as CommentMutation)).rejects.toThrow('Revision conflict');
+ });
+ it('creates against the current dirty buffer without saving, and tracks later source edits',async()=>{
+  const f=await fixture('README.md'),text='😀日本語\r\n本文';
+  vi.spyOn(f.access,'read').mockResolvedValue({text,dirty:true,version:2});
+  const state=await f.sources.read(f.file);
+  const request:CommentMutation={id:'create_dirty_01',action:'create',file:f.file,review:'review',revision:state.revision,reviewRevision:state.reviewRevision,from:2,to:5,quote:'日本語',body:'Check this.'};
+  const result=await f.api.mutate(request);
+  const created=(await f.sources.read(f.file)).threads.find(t=>t.id===result.thread)!;
+  expect(created).toMatchObject({currentQuote:'日本語',tags:['action'],sourceDirty:true,anchor:{from:2,to:5,status:'attached'}});
+  const latest=await f.sources.read(f.file);
+  await expect(f.api.mutate({...request,id:'create_surrogate_01',reviewRevision:latest.reviewRevision,from:0,to:1,quote:'\uD83D'})).rejects.toThrow('Unicode');
+  vi.spyOn(f.access,'read').mockResolvedValue({text:'prefix '+state.text,dirty:true,version:3});
+  const moved=(await f.sources.read(f.file)).threads.find(t=>t.id===result.thread)!;
+  expect(moved.currentQuote).toBe('日本語');expect(moved.anchor?.from).toBe(9);
+  expect(f.access.save).not.toHaveBeenCalled();expect(f.access.apply).not.toHaveBeenCalled();
+ });
+ it('recovers creation after an interrupted append without creating a second thread',async()=>{
+  const f=await fixture(),state=await f.sources.read(f.file);
+  const request:CommentMutation={id:'create_interrupt_01',action:'create',file:f.file,review:'review',revision:state.revision,reviewRevision:state.reviewRevision,from:0,to:0,quote:'',body:'Point comment.'};
+  const original=f.service.apply.bind(f.service);
+  vi.spyOn(f.service,'apply').mockImplementation((event,review)=>{original(event,review);throw new Error('interrupted');});
+  await expect(f.api.mutate(request)).rejects.toThrow('interrupted');
+  expect(await f.api.mutate(request)).toMatchObject({committed:true});
+  expect(f.service.view('review').threads).toHaveLength(2);
+  expect(readLog(f.dir,'review')).toHaveLength(2);
+ });
  it('validates without appending and rejects a stale request after another writer replies',async()=>{
   const f=await fixture();expect(await f.api.mutate({...f.request,dryRun:true})).toMatchObject({validated:true,committed:false});expect(readLog(f.dir,'review')).toHaveLength(1);
   f.service.apply({op:'reply',thread:'t_one',body:'another writer',author:'reviewer',ts:'now'});

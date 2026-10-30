@@ -98,7 +98,7 @@ export async function startSourceApi(context: vscode.ExtensionContext, folder: v
     rejectSymlink(path.dirname(descriptor));
     rejectSymlink(descriptor);
     const temporary = descriptor + '.' + session + '.tmp';
-    fs.writeFileSync(temporary, JSON.stringify({ protocol: 1, capabilities: ['read', 'transact', 'comment', 'recover'], session, endpoint, cli: path.join(context.extensionUri.fsPath, 'bin/tex-review.mjs') }, null, 2), { mode: 0o600, flag: 'wx' });
+    fs.writeFileSync(temporary, JSON.stringify({ protocol: 1, capabilities: ['read', 'transact', 'comment', 'comment.create', 'recover'], session, endpoint, cli: path.join(context.extensionUri.fsPath, 'bin/tex-review.mjs') }, null, 2), { mode: 0o600, flag: 'wx' });
     fs.renameSync(temporary, descriptor);
     context.subscriptions.push({ dispose() {
             disposed = true;

@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { CommentMutation, validateCommentMutation, commentMutationEvent } from '../core/commentMutation';
+import { CommentMutation, validateCommentMutation, commentMutationEvent, createCommentEvent, createCommentThreadId } from '../core/commentMutation';
 import { sourceRevision } from '../core/sourceSnapshots';
 import { readLog, logPath } from '../core/storage';
 import { validateReviewName, workspaceFile } from '../core/safePaths';
@@ -19,7 +19,7 @@ export class CommentMutations {
     // Source recovery must finish before publishing any further review events.
     await this.sources.recover();
     const previous = readLog(dir,request.review).find(event => event.apiRequest?.id === request.id);
-    const result = {id:request.id,review:request.review,thread:request.thread,action:request.action,committed:true};
+    const result = {id:request.id,review:request.review,thread:request.action === 'create' ? createCommentThreadId(request) : request.thread,action:request.action,committed:true};
     const sync = () => { const fd=fs.openSync(logPath(dir,request.review),'r');try {fs.fsyncSync(fd);}finally {fs.closeSync(fd);} };
     if (previous) {
       if (previous.apiRequest!.digest !== digest) throw new Error('Comment request ID was already used for a different request.');
@@ -27,9 +27,15 @@ export class CommentMutations {
     }
     const current = await this.sources.read(request.file);
     if (request.reviewRevision !== current.reviewRevision) throw new Error('Revision conflict. Read the source and comments again.');
-    const thread = current.threads.find(thread => thread.review === request.review && thread.id === request.thread);
-    if (!thread) throw new Error('Comment not found in this source.');
-    const event = commentMutationEvent(request,thread,new Date().toISOString());
+    let event;
+    if (request.action === 'create') {
+      if (this.service.view(request.review).threads.some(thread => thread.id === result.thread)) throw new Error('Comment thread ID already exists.');
+      event = createCommentEvent(request,current.text,new Date().toISOString());
+    } else {
+      const thread = current.threads.find(thread => thread.review === request.review && thread.id === request.thread);
+      if (!thread) throw new Error('Comment not found in this source.');
+      event = commentMutationEvent(request,thread,new Date().toISOString());
+    }
     if (request.dryRun) return {...result,committed:false,validated:true};
     // No await between the revision check and append: UI and API writers share this event loop.
     this.service.apply({...event,apiRequest:{id:request.id,digest}},request.review);
