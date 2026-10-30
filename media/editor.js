@@ -284,6 +284,14 @@ function initialize(msg) {
       conflictDraft, selectedThread });
     clearCards(); editor.destroy(); liveAnchors.clear();
   }
+  if (msg.renamedFrom && msg.renamedFrom !== msg.file) {
+    if (sourceStates.has(msg.renamedFrom)) sourceStates.set(msg.file, sourceStates.get(msg.renamedFrom));
+    sourceStates.delete(msg.renamedFrom);
+    if (savedComposers[msg.renamedFrom]) { savedComposers[msg.file]=savedComposers[msg.renamedFrom]; delete savedComposers[msg.renamedFrom]; }
+    for (const draftKey of Object.keys(drafts)) if (draftKey.endsWith(`:${msg.renamedFrom}:new`)) {
+      drafts[draftKey.slice(0,-(`${msg.renamedFrom}:new`.length))+msg.file+':new']=drafts[draftKey]; delete drafts[draftKey];
+    }
+  }
   const cached = sourceStates.get(msg.file);
   cancelCommentAlignment(); followSource = false; lastLinkedSourceTop = null; expectedRailScroll = null; cachedCommentLayout = null; commentLayoutDirty = true; layoutAnchor = null;
   pendingCommentScroll = cached?.commentScrollTop ?? (previous.file === msg.file ? previous.commentScrollTop || 0 : 0);

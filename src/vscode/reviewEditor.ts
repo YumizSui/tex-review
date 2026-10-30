@@ -1,3 +1,4 @@
+import { sourceAliases } from './fileRenames';
 import { commentTagIds, commentTagLabels, commentTags, commentTypeTags } from '../core/commentFilters';
 import { commentLink } from '../core/commentLinks';
 import { ChangeSet } from '@codemirror/state';
@@ -172,12 +173,12 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
       watcher.onDidCreate(sourceChanged, undefined, disposables);
       return watcher;
     };
-    const postSource = (kind = 'source', selection?: object, thread?: string) => {
-      post({ type: kind, text: normalizedText().toString(), version: document.version, file, active:this.service.active(),
+    const postSource = (kind = 'source', selection?: object, thread?: string, renamedFrom?: string) => {
+      post({ type: kind, renamedFrom, text: normalizedText().toString(), version: document.version, file, active:this.service.active(),
         selection, thread: thread || (selection as {thread?:string} | undefined)?.thread, showResolved: (selection as {showResolved?:boolean} | undefined)?.showResolved, transactionPending: this.service.transactionPending, config: config(),
         worker: panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'pdf.worker.mjs')).toString() });
     };
-    const switchSource = async (nextFile: string, selection?: object, thread?: string) => {
+    const switchSource = async (nextFile: string, selection?: object, thread?: string, renamedFrom?: string) => {
       const target = workspaceFile(root, nextFile);
       const next = await vscode.workspace.openTextDocument(vscode.Uri.file(target));
       if (disposed) return;
@@ -191,7 +192,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
       sourceWatcher = watchSource();
       await this.context.workspaceState.update('texReview.source', file);
       pdfPath = this.findPdf(document);
-      postSource('source', selection, thread); review(); pdfState(); scheduleSyntax(); await comparisonState(); updateTitle();
+      postSource('source', selection, thread, renamedFrom); review(); pdfState(); scheduleSyntax(); await comparisonState(); updateTitle();
     };
     const syntaxState = async () => {
       if (!activeTheme || disposed || !panel.visible) return;
@@ -223,7 +224,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
       const enabled = this.context.workspaceState.get<boolean>('texReview.compareEnabled', false);
       if (!enabled || !baseline) { postComparison({ type: 'comparison', enabled: false, available: !!baseline }); return; }
       try {
-        const text = await baselineText(root, file, baseline);
+        const text = await baselineText(root, file, baseline, sourceAliases(root,file));
         if (generation !== comparisonGeneration) return;
         postComparison({ type: 'comparison', enabled: text !== null, available: true, text, label: baseline.label,
           message: text === null ? vscode.l10n.t('Choose a baseline for this file.') : undefined });
@@ -254,7 +255,7 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
         baseline = { kind: 'file', path: selected[0].fsPath, source: file, label: path.basename(selected[0].fsPath) };
       }
       // Validate before replacing the working comparison; never write the baseline.
-      try { await baselineText(root, file, baseline); }
+      try { await baselineText(root, file, baseline, sourceAliases(root,file)); }
       catch { throw new Error(vscode.l10n.t('Cannot read the baseline for this file. It may not exist at that checkpoint.')); }
       await this.context.workspaceState.update('texReview.baseline', baseline);
       await this.context.workspaceState.update('texReview.compareEnabled', true);
@@ -287,6 +288,14 @@ export class ReviewEditor implements vscode.CustomTextEditorProvider {
     disposables.push(this.service.onTransactionChanged(() => {
       post({type:'transaction',busy:this.service.transactionPending});
       if (!this.service.transactionPending && ready) { docState(); review(); scheduleSyntax(); }
+    }));
+    disposables.push(this.service.onSourceRenamed((from,to)=>{
+      if (this.selectedRoot===from) {this.selectedRoot=to;void this.context.workspaceState.update('texReview.root',to);}
+      scopeCache=undefined;
+      if (file===from) {
+        visited.delete(from);
+        queue=queue.then(()=>switchSource(to,undefined,undefined,from)).catch(e=>post({type:'error',error:String(e)}));
+      } else if (ready) review();
     }));
     const adoptDocument = (next: vscode.TextDocument) => {
       if (next !== document && next.uri.toString() === document.uri.toString()) {

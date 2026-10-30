@@ -107,7 +107,16 @@ export interface SetTagsEvent {
   op: 'set_tags'; thread: string; tags: CommentTag[]; ts: string;
 }
 
+export interface MoveThreadEvent {
+  op: 'move_thread'; thread: string; fromFile: string; file: string;
+  range: LineRange; anchor: VersionedAnchor; ts: string;
+}
+export interface RenameFileEvent {
+  op: 'rename_file'; fromFile: string; file: string; revision: string;
+  anchors: SetAnchorsEvent['anchors']; renameId: string; ts: string;
+}
 export type ReviewEvent = (
+  | MoveThreadEvent | RenameFileEvent
   | SetTagsEvent
   | SetAnchorsEvent
   | AddThreadEvent

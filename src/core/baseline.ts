@@ -20,17 +20,22 @@ export async function checkpoint(root: string, ref: string): Promise<Baseline> {
   // Freeze branch/tag names to the resolved commit, so comparison stays stable.
   return { kind: 'git', revision, label: revision.slice(0, 8) };
 }
-export async function baselineText(root: string, source: string, baseline: Baseline): Promise<string | null> {
+export async function baselineText(root: string, source: string, baseline: Baseline, aliases: string[] = []): Promise<string | null> {
   workspaceFile(root, source);
   if (baseline.kind === 'file') {
-    if (baseline.source !== source) return null;
+    if (baseline.source !== source && !aliases.includes(baseline.source)) return null;
     if (!fs.statSync(baseline.path).isFile() || fs.statSync(baseline.path).size > 16_000_000) throw new Error('Invalid baseline file');
     return fs.readFileSync(baseline.path, 'utf8').replace(/\r\n/g, '\n');
   }
   if (!/^[a-f0-9]{40,64}$/.test(baseline.revision)) throw new Error('Invalid checkpoint');
   // Resolve from the repository root, including workspaces opened in a subdirectory.
   const { stdout: prefix } = await run('git', ['rev-parse', '--show-prefix'], options(root));
-  const gitPath = (prefix.trim() + source.split(path.sep).join('/'));
-  const { stdout } = await run('git', ['show', `${baseline.revision}:${gitPath}`], options(root));
-  return stdout.replace(/\r\n/g, '\n');
+  let failure: unknown;
+  for (const candidate of [source,...aliases]) {
+    workspaceFile(root,candidate);
+    const gitPath=prefix.trim()+candidate.split(path.sep).join('/');
+    try {const {stdout}=await run('git',['show',`${baseline.revision}:${gitPath}`],options(root));return stdout.replace(/\r\n/g,'\n');}
+    catch (error) {failure=error;}
+  }
+  throw failure;
 }

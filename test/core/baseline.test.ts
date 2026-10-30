@@ -22,6 +22,7 @@ describe('comparison baselines', () => {
       expect(await baselineText(path.join(root, 'paper'), 'chapters/a.tex', baseline)).toBe('baseline 日本語\n');
       await expect(checkpoint(root, '--output=/tmp/anything')).rejects.toThrow();
       await expect(baselineText(root, 'missing.tex', baseline)).rejects.toThrow();
+      expect(await baselineText(root,'paper/renamed.tex',baseline,['paper/chapters/a.tex'])).toBe('baseline 日本語\n');
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
   it('reads a separate file without changing either file and limits it to the selected source', async () => {
@@ -31,6 +32,7 @@ describe('comparison baselines', () => {
       const baseline = { kind: 'file' as const, path: baselinePath, source: 'current.tex', label: 'old.tex' };
       expect(await baselineText(root, 'current.tex', baseline)).toBe('old\n');
       expect(await baselineText(root, 'other.tex', baseline)).toBeNull();
+      expect(await baselineText(root,'renamed.tex',baseline,['current.tex'])).toBe('old\n');
       expect(fs.readFileSync(baselinePath, 'utf8')).toBe('old\r\n');
       expect(fs.existsSync(path.join(root, 'current.tex'))).toBe(false);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }

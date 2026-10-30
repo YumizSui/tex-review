@@ -13,17 +13,23 @@ interface CommentMutationBase {
 }
 export type ExistingCommentMutation = CommentMutationBase & { thread: string; action: 'reply' | 'resolve' | 'reopen' | 'set_tags' };
 export type CreateCommentMutation = CommentMutationBase & { action: 'create'; revision: string; from: number; to: number; quote: string };
-export type CommentMutation = ExistingCommentMutation | CreateCommentMutation;
+export type MoveCommentMutation = CommentMutationBase & {action:'move';thread:string;destination:{file:string;revision:string;reviewRevision:string;from:number;to:number;quote:string}};
+export type CommentMutation = ExistingCommentMutation | CreateCommentMutation | MoveCommentMutation;
 export function validateCommentMutation(request: CommentMutation) {
   if (!request || typeof request !== 'object' || typeof request.id !== 'string' || !/^[a-zA-Z0-9_-]{8,100}$/.test(request.id) ||
       typeof request.file !== 'string' || typeof request.review !== 'string' ||
       typeof request.reviewRevision !== 'string' || !/^[a-f0-9]{64}$/.test(request.reviewRevision) ||
-      !['create','reply','resolve','reopen','set_tags'].includes(request.action) || (request.dryRun !== undefined && typeof request.dryRun !== 'boolean'))
+      !['move','create','reply','resolve','reopen','set_tags'].includes(request.action) || (request.dryRun !== undefined && typeof request.dryRun !== 'boolean'))
     throw new Error('Invalid comment request.');
-  const fields = ['id','file','review','reviewRevision','action','dryRun', ...(request.action === 'create' ? ['revision','from','to','quote','body','tags'] : ['thread', ...(request.action === 'reply' ? ['body'] : request.action === 'set_tags' ? ['tags'] : [])])];
+  const fields = ['id','file','review','reviewRevision','action','dryRun', ...(request.action === 'create' ? ['revision','from','to','quote','body','tags'] : request.action === 'move' ? ['thread','destination'] : ['thread', ...(request.action === 'reply' ? ['body'] : request.action === 'set_tags' ? ['tags'] : [])])];
   if (Object.keys(request).some(key => !fields.includes(key))) throw new Error('Unexpected comment request field.');
   if (request.action !== 'create' && (typeof request.thread !== 'string' || !request.thread || request.thread.length > 200)) throw new Error('Invalid comment thread.');
   if ((request.action === 'reply' || request.action === 'create') && (typeof request.body !== 'string' || !request.body.trim() || request.body.length > 100000)) throw new Error('Provide a nonempty comment body (at most 100000 characters).');
+  if (request.action === 'move') {
+    const d=request.destination;
+    if (!d || typeof d !== 'object' || Object.keys(d).some(k=>!['file','revision','reviewRevision','from','to','quote'].includes(k)) || typeof d.file !== 'string' || typeof d.reviewRevision !== 'string' || !/^[a-f0-9]{64}$/.test(d.reviewRevision)) throw new Error('Invalid comment destination.');
+    validateCommentMutation({id:request.id,file:d.file,review:request.review,reviewRevision:d.reviewRevision,action:'create',revision:d.revision,from:d.from,to:d.to,quote:d.quote,body:'validate target'});
+  }
   if (request.action === 'create') {
     if (typeof request.revision !== 'string' || !/^[a-f0-9]{64}$/.test(request.revision) || !Number.isSafeInteger(request.from) || !Number.isSafeInteger(request.to) || request.from < 0 || request.to < request.from || typeof request.quote !== 'string') throw new Error('Invalid comment target.');
     commentTypeTags(request.tags);

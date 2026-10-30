@@ -1,3 +1,4 @@
+import { lineRange } from '../core/commentAnchors';
 import * as fs from 'node:fs';
 import { retireLegacySnapshots } from '../core/legacySnapshots';
 import { readCheckpoints, checkpointPath } from '../core/sourceCheckpoints';
@@ -29,6 +30,19 @@ export class ReviewService {
   }
   constructor(private readonly dir: string) { this.anchors = new AnchorStore(dir); }
 
+  private readonly renameListeners = new Set<(from: string,to: string)=>void>();
+  onSourceRenamed(listener: (from: string,to: string)=>void) { this.renameListeners.add(listener); return {dispose:()=>{this.renameListeners.delete(listener);}}; }
+  sourceRenamed(from: string,to: string) { for (const listener of this.renameListeners) listener(from,to); }
+  renameSnapshot(file: string) {
+    const views=this.list().map(name=>this.view(name,true)), source=this.anchors.cached(file);
+    return {text:source.text.toString(),dirty:source.dirty,revision:source.revision,
+      reviews:views.map(view=>({review:view.name,anchors:view.threads.filter(t=>t.file===file).map(t=>{
+        const position=source.entries.get(JSON.stringify([view.name,t.id]))?.position;
+        if (!position) throw new Error('Comment anchor is unavailable.');
+        return {thread:t.id,...position,range:lineRange(source.text,position)};
+      })}))};
+  }
+  forgetSource(file: string) { this.anchors.forgetSource(file); }
   trackedFiles(): string[] { return this.anchors.files(); }
 
   updateDocument(file: string, text: string, changes?: ChangeSet, dirty = false): void {
@@ -138,12 +152,12 @@ export class ReviewService {
     }
   }
 
-  view(name: string): ReviewView {
+  view(name: string, includeDeleted = false): ReviewView {
     const events = storage.readLog(this.dir, name);
     // Hidden threads must keep following the source so Restore works after a restart.
     const projected = this.anchors.project(fold(name, events, true), events);
     const visible = new Set(fold(name, events).threads.map(t => t.id));
-    return { ...projected, threads: projected.threads.filter(t => visible.has(t.id)) };
+    return { ...projected, threads: projected.threads.filter(t => includeDeleted || visible.has(t.id)) };
   }
 
   // Recompute and persist the active review's view. Safe to call on every
@@ -161,11 +175,11 @@ export class ReviewService {
   // its view, return it. Pass `target` to act on a non-active review, e.g. from
   // the tree panel context menu.
   apply(event: ReviewEvent, target?: string): ReviewView {
-    if (this.transactionPending && !(event.op === 'set_anchors' && event.transaction)) throw new Error('A source transaction is in progress.');
+    if (this.transactionPending && !(event.op === 'set_anchors' && event.transaction) && event.op !== 'rename_file') throw new Error('A source transaction is in progress.');
     const name = target ?? this.active();
     if (!name) throw new Error('No active review. Create one first.');
     if (event.op === 'add_thread' && !event.anchor) event = { ...event, anchor: this.anchors.capture(event.file, event.range) };
-    if (event.op === 'add_thread' || event.op === 'set_anchors') {
+    if (event.op === 'add_thread' || event.op === 'set_anchors' || event.op === 'move_thread' || event.op === 'rename_file') {
       for (const review of this.list()) this.view(review);
       const events = [...storage.readLog(this.dir, name), event];
       this.anchors.project(fold(name, events, true), events);
@@ -174,6 +188,7 @@ export class ReviewService {
       this.anchors.checkpoint(event.file, true);
     }
     storage.appendEvent(this.dir, name, event);
+    if (event.op === 'move_thread') this.anchors.checkpoint(event.fromFile,true);
     const v = this.view(name);
     if (!this.transactionPending) storage.writeView(this.dir, name, v);
     return v;

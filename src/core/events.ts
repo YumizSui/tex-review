@@ -25,6 +25,19 @@ export function fold(name: string, events: ReviewEvent[], includeDeleted = false
         order.push(e.id);
         break;
       }
+      case 'move_thread': {
+        const thread = byId.get(e.thread);
+        if (thread?.file === e.fromFile) byId.set(thread.id, {...thread,file:e.file,range:e.range,anchor:e.anchor});
+        break;
+      }
+      case 'rename_file': {
+        for (const a of e.anchors) {
+          const thread = byId.get(a.thread);
+          if (thread?.file === e.fromFile) byId.set(thread.id,{...thread,file:e.file,range:a.range,
+            anchor:{revision:e.revision,from:a.from,to:a.to,status:a.status}});
+        }
+        break;
+      }
       case 'set_tags': {
         const thread = byId.get(e.thread);
         if (thread) byId.set(thread.id, { ...thread, tags: commentTags(e.tags) });

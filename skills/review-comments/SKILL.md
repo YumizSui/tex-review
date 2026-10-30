@@ -112,9 +112,27 @@ node /path/from/api.json/tex-review.mjs comment comment-request.json
   manuscript or comment text into shell commands.
 
 Reply, status, and type operations target existing stable thread IDs. They do not
-delete threads, rewrite existing comments, move anchors, or resolve anything implicitly.
+delete threads, rewrite existing comments, or resolve anything implicitly.
 Source editing and a later reply remain separate explicit operations; the source
 transaction is the unit that keeps text and destinations together.
+
+## Move threads and rename files
+
+For a passage moved to a different source, use `comment` with `action: "move"`
+(`comment.move` capability). Read both files, then name the existing thread and
+source `reviewRevision`; provide `destination` with its `file`, `revision`,
+`reviewRevision`, `from`, `to`, and exact `quote`. The original snapshot and all
+thread metadata are preserved. Neither file is edited by this operation.
+
+For a file rename, prefer CLI `rename` (`rename` capability) over shell `mv`.
+Save the source, read it, and send `id`, old `file`, `toFile`, `revision`, and
+`reviewRevision`. Use an unused destination in an existing folder. This carries
+all reviews, hidden/resolved threads, and baseline path history to the new file.
+It does not rewrite TeX includes/build configuration. Validate with `dryRun`,
+retry the same ID/request after timeout, and read the new path afterwards.
+If recovery reports conflicting filesystem changes, retain the intent and
+resolve the conflict; do not bypass it by editing logs or checkpoints.
+See the [API reference](../../docs/AI_EDITING.md#rename-a-reviewed-file).
 
 ## Typical loop
 

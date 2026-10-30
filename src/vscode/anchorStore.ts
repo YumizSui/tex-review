@@ -66,9 +66,9 @@ export class AnchorStore {
     if (source.history.size > 200) source.history.delete(source.history.keys().next().value!);
   }
   project(view: ReviewView, events: ReviewEvent[]): ReviewView {
-    const present = new Set(view.threads.map(thread => key(view.name, thread.id)));
-    for (const source of this.sources.values()) for (const id of source.entries.keys()) {
-      if (JSON.parse(id)[0] === view.name && !present.has(id)) source.entries.delete(id);
+    const present = new Map(view.threads.map(thread => [key(view.name, thread.id),thread.file]));
+    for (const [file, source] of this.sources) for (const id of source.entries.keys()) {
+      if (JSON.parse(id)[0] === view.name && present.get(id) !== file) source.entries.delete(id);
     }
     const baselines = new Map<string, { text: Text; changes: ChangeSet } | null>(), checked = new Set<string>();
     return { ...view, threads: view.threads.map(thread => {
@@ -119,7 +119,7 @@ export class AnchorStore {
         source.history.get(source.revision)?.set(id, {...entry.position});
       }
       return { ...thread, range: source.available ? lineRange(source.text, entry.position) : thread.range,
-        anchor: { ...entry.position, revision: source.revision }, sourceDirty: source.dirty };
+        anchor: { ...entry.position, ...(!source.available ? {status:'uncertain' as const} : {}), revision: source.revision }, sourceDirty: source.dirty };
     }) };
   }
   update(file: string, text: string, changes?: ChangeSet, dirty = false) {
@@ -143,7 +143,7 @@ export class AnchorStore {
     const source = this.source(file);
     if (source.dirty) return;
     try { this.update(file, fs.readFileSync(workspaceFile(path.dirname(this.dir), file), 'utf8')); }
-    catch { source.available = false; for (const entry of source.entries.values()) entry.position = { ...entry.position, status: 'uncertain' }; }
+    catch { source.available = false; }
   }
   capture(file: string, range: Thread['range']): VersionedAnchor | undefined {
     const source = this.source(file);
@@ -152,11 +152,24 @@ export class AnchorStore {
   }
   checkpoint(file: string, allowDirty = false): void {
     const source = this.source(file);
-    if (!source.available || (source.dirty && !allowDirty) || !source.entries.size) return;
+    if (!source.entries.size) {
+      for (const target of [checkpointPath(this.dir,file),checkpointPath(this.dir,file)+'.previous']) if (fs.existsSync(target)) fs.unlinkSync(target);
+      source.checkpoints=[];source.checkpointStamp=this.savedStamp(file);return;
+    }
+    if (!source.available || (source.dirty && !allowDirty)) return;
     const state: SourceCheckpoint = { version: 1, file, text: source.text.toString(), revision: source.revision,
       entries: Object.fromEntries([...source.entries].map(([id, e]) => [id, { signature: e.signature, position: { ...e.position } }])) };
     writeCheckpoint(this.dir, state, source.checkpoints[0] ?? null);
     source.checkpoints = readCheckpoints(this.dir, file); source.checkpointStamp = this.savedStamp(file);
+  }
+  cached(file: string) { return this.source(file); }
+  forgetSource(file: string) {
+    const source=this.sources.get(file);
+    if (source?.entries.size) throw new Error('Source still has comment anchors.');
+    this.sources.delete(file);
+    for (const target of [checkpointPath(this.dir,file),checkpointPath(this.dir,file)+'.previous']) {
+      if (fs.existsSync(target)) fs.unlinkSync(target);
+    }
   }
   forgetReview(review: string): void {
     for (const source of this.sources.values()) for (const id of source.entries.keys()) {

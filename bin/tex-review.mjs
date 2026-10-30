@@ -12,12 +12,14 @@ try {
         request = { op: 'read', file: argument };
     else if (operation === 'transact')
         request = { op: 'transact', transaction: JSON.parse(fs.readFileSync(argument || 0, 'utf8')) };
+    else if (operation === 'rename')
+        request = { op: 'rename', rename: JSON.parse(fs.readFileSync(argument || 0, 'utf8')) };
     else if (operation === 'comment')
         request = { op: 'comment', comment: JSON.parse(fs.readFileSync(argument || 0, 'utf8')) };
     else if (operation === 'recover')
         request = { op: 'recover' };
     else
-        throw new Error('Usage: node tex-review.mjs read <source.tex> | transact [request.json] | comment [request.json] | recover');
+        throw new Error('Usage: node tex-review.mjs read <source.tex> | transact [request.json] | comment [request.json] | rename [request.json] | recover');
     const response = await new Promise((resolve, reject) => {
         const socket = net.createConnection(descriptor.endpoint);
         socket.setEncoding('utf8');

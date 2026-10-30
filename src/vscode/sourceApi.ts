@@ -1,3 +1,5 @@
+import { FileRenames, RenameRequest, validateRenameRequest } from './fileRenames';
+import { sourceRevision } from '../core/sourceSnapshots';
 import * as vscode from 'vscode';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -27,7 +29,9 @@ export async function startSourceApi(context: vscode.ExtensionContext, folder: v
         },
         async save(file) { return (await document(file)).save(); },
     });
+    const renames = new FileRenames(root,service);
     try {
+        renames.recover();
         await transactions.recover();
     }
     catch (error) {
@@ -39,7 +43,7 @@ export async function startSourceApi(context: vscode.ExtensionContext, folder: v
     const endpoint = process.platform === 'win32' ? `\\\\.\\pipe\\tex-review-${session}` : path.join(socketDirectory!, 'api.sock');
     let queue = Promise.resolve(), disposed = false;
     context.subscriptions.push(vscode.commands.registerCommand('texReview.recoverTransaction', () => {
-        const result = queue.then(() => transactions.recover());
+        const result = queue.then(() => { renames.recover(); return transactions.recover(); });
         queue = result.then(() => undefined, () => undefined);
         return result;
     }));
@@ -75,12 +79,37 @@ export async function startSourceApi(context: vscode.ExtensionContext, folder: v
                         result = await transactions.read(request.file);
                     else if (request.op === 'transact')
                         result = await transactions.transact(request.transaction);
+                    else if (request.op === 'rename') {
+                        const r=request.rename as RenameRequest;
+                        validateRenameRequest(r);
+                        if ([r.file,r.toFile].some(f=>f.split('/').some(part=>part==='.review'||part==='.git'))) throw new Error('Cannot rename review or Git storage.');
+                        const digest=sourceRevision(JSON.stringify(r));
+                        renames.recover(); await transactions.recover();
+                        if (renames.receipt(r.id,digest)) result={id:r.id,file:r.toFile,committed:true};
+                        else {
+                            const current=await transactions.read(r.file);
+                            const destination=workspaceFile(root,r.toFile);
+                            if (current.dirty || current.revision!==r.revision || current.reviewRevision!==r.reviewRevision) throw new Error('Revision conflict or unsaved source. Save and read again before renaming.');
+                            if (fs.existsSync(destination) || !fs.statSync(path.dirname(destination)).isDirectory()) throw new Error('Choose a new filename in an existing destination folder.');
+                            if (r.dryRun) { renames.stage([{from:r.file,to:r.toFile}],r.id,digest,false,true); result={id:r.id,file:r.toFile,validated:true,committed:false}; }
+                            else {
+                                renames.stage([{from:r.file,to:r.toFile}],r.id,digest);
+                                const edit=new vscode.WorkspaceEdit();
+                                edit.renameFile(vscode.Uri.file(workspaceFile(root,r.file)),vscode.Uri.file(destination),{overwrite:false});
+                                try { if (!await vscode.workspace.applyEdit(edit)) throw new Error('Editor rejected the file rename.'); }
+                                catch (error) { renames.recover(); throw error; }
+                                const outcome=renames.recover();
+                                if (outcome.committed===false) throw new Error('File rename was not applied.');
+                                result={id:r.id,file:r.toFile,committed:true};
+                            }
+                        }
+                    }
                     else if (request.op === 'comment')
                         result = await comments.mutate(request.comment);
                     else if (request.op === 'recover')
-                        result = await transactions.recover() || { pending: false };
+                        { const renamed=renames.recover(); result = await transactions.recover() || renamed; }
                     else
-                        throw new Error('Unknown operation. Use read, transact, comment, or recover.');
+                        throw new Error('Unknown operation. Use read, transact, comment, rename, or recover.');
                     socket.end(JSON.stringify({ ok: true, result }) + '\n');
                 }
                 catch (error) {
@@ -98,7 +127,7 @@ export async function startSourceApi(context: vscode.ExtensionContext, folder: v
     rejectSymlink(path.dirname(descriptor));
     rejectSymlink(descriptor);
     const temporary = descriptor + '.' + session + '.tmp';
-    fs.writeFileSync(temporary, JSON.stringify({ protocol: 1, capabilities: ['read', 'transact', 'comment', 'comment.create', 'recover'], session, endpoint, cli: path.join(context.extensionUri.fsPath, 'bin/tex-review.mjs') }, null, 2), { mode: 0o600, flag: 'wx' });
+    fs.writeFileSync(temporary, JSON.stringify({ protocol: 1, capabilities: ['read', 'transact', 'comment', 'comment.create', 'comment.move', 'rename', 'recover'], session, endpoint, cli: path.join(context.extensionUri.fsPath, 'bin/tex-review.mjs') }, null, 2), { mode: 0o600, flag: 'wx' });
     fs.renameSync(temporary, descriptor);
     context.subscriptions.push({ dispose() {
             disposed = true;

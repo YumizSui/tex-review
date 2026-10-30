@@ -57,8 +57,7 @@ including resolved comments and comments from other reviews. A missing mapping
 rejects the whole operation and returns `missing` review/thread pairs. Unaffected
 comments follow the exact edits automatically. After deleting a passage, assign
 its comment to a remaining passage or an explicit zero-length boundary (`from`
-equals `to`, with an empty `quote`). Moving comments between source files is not
-yet supported.
+equals `to`, with an empty `quote`). Use the explicit `move` comment operation below to relocate a thread between files. Source transactions still edit one file at a time.
 
 Set `"dryRun": true` to validate the complete transaction without changing source
 or review history. Use a new ID for a different transaction. If a request times
@@ -89,6 +88,7 @@ Each request performs one explicit action:
 | --- | --- | --- |
 | `create` | `revision`, `from`, `to`, `quote`, `body`; optional `tags` | Create an open thread as `agent`; returns its `thread` ID. |
 | `reply` | `body` | Append a reply as `agent`. |
+| `move` | `destination` | Move the existing thread to an exact passage in another source. |
 | `set_tags` | `tags`, e.g. `["question"]` | Set the thread's comment type. |
 | `resolve` | None | Mark the thread resolved. |
 | `reopen` | None | Mark the thread open. |
@@ -138,10 +138,79 @@ digest are stored with the event, so retries remain idempotent after a restart.
 IDs are scoped to the review. A different request must use a new ID.
 
 A comment operation appends one event and does not edit or save the source,
-move existing anchors, rewrite original quotes, or modify existing comments. Creation captures a new anchor and its original quote. It can
+move existing anchors unless `move` is requested, rewrite original quotes, or modify existing comments. Creation captures a new anchor and its original quote. It can
 run while the editor has unsaved source changes. UI/API writers are serialized
 by the extension; independent direct log writers do not participate in that
 serialization. Use this API instead of writing the log directly.
+
+## Move a thread between files
+
+Check for `comment.move` in `capabilities`. Read both sources immediately before
+submitting `comment` with the original `file`, `review`, `thread`, and source
+`reviewRevision`, plus `action: "move"` and:
+
+```json
+{
+  "destination": {
+    "file": "chapters/discussion.tex",
+    "revision": "destination revision returned by read",
+    "reviewRevision": "destination reviewRevision returned by read",
+    "from": 100,
+    "to": 112,
+    "quote": "exact target"
+  }
+}
+```
+
+The ID, replies, original snapshot, type, and resolved status stay unchanged.
+Only the current file and anchor change, recorded as an append-only event.
+Neither source is edited. Read the destination after completion; retries and
+`dryRun` work as for other comment operations. Do not delete and recreate the
+thread to simulate a move.
+
+## Rename a reviewed file
+
+Check for `rename` in `capabilities`. Save pending source edits, then `read` the
+old file and submit a `rename` request through the CLI:
+
+```json
+{
+  "id": "unique-rename-request-001",
+  "file": "chapters/introduction.tex",
+  "toFile": "chapters/background.tex",
+  "revision": "source revision returned by read",
+  "reviewRevision": "source reviewRevision returned by read"
+}
+```
+
+```sh
+node /path/from/api.json/tex-review.mjs rename rename-request.json
+```
+
+The destination must be new, inside the workspace, in an existing folder, and
+have no previous review threads. The extension uses the editor's file rename,
+then moves all associated threads across every review, including resolved and
+hidden threads. Comment IDs, replies, type, status, quotes, and positions are
+preserved. The review session follows the new filename. Recorded earlier names
+are used for file/checkpoint baselines, preferring the current path if it exists
+at that checkpoint. TeX `\input` paths and build configuration are not rewritten
+by this API; update those through source transactions as needed.
+
+Use `dryRun` first; it validates without staging an operation. A durable intent
+precedes the actual rename; `recover` finishes partially published review events
+only if the destination content matches and the old file is absent. A cancelled
+rename with unchanged paths is aborted. Conflicts retain the intent and refuse
+to overwrite unrelated edits. Retry the same ID and exact request after a lost
+response. Compact retry receipts retain the last 100 successful renames.
+
+Explorer/editor file and folder renames use the same tracking and preserve
+unsaved native buffers without saving them. The API rename requires a clean source. For external filesystem/Git renames, the extension follows only
+an observed or opened destination whose complete normalized text matches one
+unique missing tracked source. It does not scan all text files, infer changed
+content, or choose among identical candidates. Non-TeX destinations must be
+opened to be observed. Renames performed while the extension was stopped cannot
+always be recognized; reopen the destination and verify the comments. Use
+`recover` if an editor rename was cancelled after an intent was staged.
 
 ## Commit and recovery
 

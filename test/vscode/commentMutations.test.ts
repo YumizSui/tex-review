@@ -92,6 +92,21 @@ describe('comment API mutations',()=>{
   expect(f.service.view('review').threads).toHaveLength(2);
   expect(readLog(f.dir,'review')).toHaveLength(2);
  });
+ it('moves a thread to another file with all comments, type and status intact',async()=>{
+  const f=await fixture(),dest='destination.md',text='前文。日本語の本文。後文。';fs.writeFileSync(path.join(f.root,dest),text);
+  vi.spyOn(f.access,'read').mockImplementation(async(file?:string)=>({text:file===dest?text:f.text,dirty:false,version:1}));
+  f.service.apply({op:'reply',thread:'t_one',body:'existing reply',author:'agent',ts:'now'});
+  f.service.apply({op:'resolve',thread:'t_one',ts:'now'});
+  const original=f.service.view('review').threads[0],before=await f.sources.read(f.file),target=await f.sources.read(dest);
+  const request:CommentMutation={id:'move_thread_001',action:'move',file:f.file,review:'review',thread:'t_one',reviewRevision:before.reviewRevision,destination:{file:dest,revision:target.revision,reviewRevision:target.reviewRevision,from:3,to:10,quote:text.slice(3,10)}};
+  expect(await f.api.mutate({...request,dryRun:true})).toMatchObject({committed:false});
+  const result=await f.api.mutate(request);expect(await f.api.mutate(request)).toEqual(result);
+  const service=new ReviewService(f.dir),moved=service.view('review').threads[0];
+  expect(moved).toMatchObject({file:dest,id:original.id,snapshot:original.snapshot,comments:original.comments,status:'resolved',tags:original.tags,anchor:{from:3,to:10,status:'attached'}});
+  expect((await f.sources.read(f.file)).threads).toHaveLength(0);
+  expect(fs.readFileSync(path.join(f.root,f.file),'utf8')).toBe(f.text);expect(fs.readFileSync(path.join(f.root,dest),'utf8')).toBe(text);
+  await expect(f.api.mutate({...request,id:'move_wrong_001',destination:{...request.destination,quote:'wrong'}})).rejects.toThrow();
+ });
  it('validates without appending and rejects a stale request after another writer replies',async()=>{
   const f=await fixture();expect(await f.api.mutate({...f.request,dryRun:true})).toMatchObject({validated:true,committed:false});expect(readLog(f.dir,'review')).toHaveLength(1);
   f.service.apply({op:'reply',thread:'t_one',body:'another writer',author:'reviewer',ts:'now'});
