@@ -9,11 +9,13 @@ import { workspaceFile, rejectSymlink } from '../core/safePaths';
 import { readLog } from '../core/storage';
 import { checkpointPath } from '../core/sourceCheckpoints';
 import { SetAnchorsEvent } from '../core/types';
+import { assertSourceSaveStable, SourceSavePolicy } from '../core/sourceSavePolicy';
 export interface SourceAccess {
     read(file: string): Promise<{
         text: string;
         dirty: boolean;
         version: number;
+        savePolicy?: SourceSavePolicy;
     }>;
     apply(file: string, before: string, version: number, edits: SourceEdit[]): Promise<boolean>;
     save(file: string): Promise<boolean>;
@@ -103,6 +105,12 @@ export class SourceTransactions {
     }
     private views() { return this.service.list().map(name => this.service.view(name)); }
     private hasEvent(review: string, id: string) { return readLog(path.join(this.root, '.review'), review).some(e => e.op === 'set_anchors' && e.transaction === id); }
+    private disk(file: string) { return sourceText(fs.readFileSync(workspaceFile(this.root, file), 'utf8')).toString(); }
+    private async verifySaved(journal: Journal, message: string) {
+        const current = await this.access.read(journal.file);
+        if (current.dirty || sourceText(current.text).toString() !== journal.after || this.disk(journal.file) !== journal.after)
+            throw new Error(message);
+    }
     private finish(journal: Journal, recovered = false): Result {
         this.service.updateDocument(journal.file, journal.after, undefined, false);
         for (const { review, event } of journal.events)
@@ -156,20 +164,22 @@ export class SourceTransactions {
         if (sourceRevision(journal.after) !== journal.revision)
             throw new Error('Invalid transaction journal. Manual recovery is required.');
         const current = await this.access.read(journal.file), text = sourceText(current.text).toString();
+        const disk = this.disk(journal.file);
         const published = journal.events.some(e => this.hasEvent(e.review, journal.id));
-        if (text === journal.before && !current.dirty && !published) {
+        if (text === journal.before && disk === journal.before && !current.dirty && !published) {
             const result = { id: journal.id, revision: sourceRevision(text), committed: false, recovered: true };
             this.receipt(journal, result);
             this.service.endTransaction();
             return result;
         }
-        if (text !== journal.after)
+        if (text !== journal.after || disk !== journal.after && (!current.dirty || disk !== journal.before))
             throw new Error('A pending transaction conflicts with subsequent source changes. The journal is retained; no source was overwritten.');
-        if (current.dirty && !await this.access.save(journal.file))
-            throw new Error('Unable to save the pending transaction. Retry recovery after resolving the save failure.');
-        const saved = sourceText(fs.readFileSync(workspaceFile(this.root, journal.file), 'utf8')).toString();
-        if (saved !== journal.after)
-            throw new Error('Source changed during transaction recovery. The journal is retained.');
+        if (current.dirty) {
+            assertSourceSaveStable(journal.after, current.savePolicy);
+            if (!await this.access.save(journal.file))
+                throw new Error('Unable to save the pending transaction. Retry recovery after resolving the save failure.');
+        }
+        await this.verifySaved(journal, 'Source changed during transaction recovery. The journal is retained.');
         return this.finish(journal, true);
     }
     async read(file: string) {
@@ -207,6 +217,7 @@ export class SourceTransactions {
             throw new Error('Disk and editor differ. Wait for the source to reload.');
         this.service.updateDocument(request.file, before, undefined, false);
         const plan = planTransaction(request, before, this.views());
+        assertSourceSaveStable(plan.after, current.savePolicy);
         if (request.dryRun)
             return { id: request.id, revision: plan.revision, committed: false, validated: true, anchors: plan.events };
         const journal: Journal = { id: request.id, file: request.file, digest, before, after: plan.after, revision: plan.revision, events: plan.events };
@@ -227,14 +238,15 @@ export class SourceTransactions {
             this.service.updateDocument(request.file, plan.after, plan.changes, true);
             if (!await this.access.save(request.file))
                 throw new Error('Unable to save the transaction. Recovery is required.');
-            if (sourceText(fs.readFileSync(workspaceFile(this.root, request.file), 'utf8')).toString() !== plan.after)
-                throw new Error('Saved source differs from the transaction. Recovery is required.');
+            await this.verifySaved(journal, 'Saved source or editor differs from the transaction. Recovery is required.');
             return this.finish(journal);
         }
         catch (error) {
             // Failure before any change is an abort. Later failures retain the complete intent for recovery.
-            const state = await this.access.read(request.file);
-            if ((!attempted || refused || sourceText(state.text).toString() === before && !state.dirty) && !journal.events.some(e => this.hasEvent(e.review, journal.id))) {
+            let state;
+            try { state = await this.access.read(request.file); }
+            catch { throw error; } // An unavailable editor must retain the journal and the original failure.
+            if ((!attempted || refused || sourceText(state.text).toString() === before && !state.dirty && this.disk(request.file) === before) && !journal.events.some(e => this.hasEvent(e.review, journal.id))) {
                 if (fs.existsSync(this.target('pending.json')))
                     this.receipt(journal, { id: request.id, revision: request.revision, committed: false });
                 this.service.endTransaction();

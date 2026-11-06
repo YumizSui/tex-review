@@ -8,11 +8,11 @@ import { readLog } from '../../src/core/storage';
 const roots: string[] = [];
 afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0))
     fs.rmSync(root, { recursive: true, force: true }); });
-async function fixture(two = false, file = 'a.tex') {
+async function fixture(two = false, file = 'a.tex', initial = 'before\nold target\nafter') {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tex-transaction-'));
     roots.push(root);
     const source = path.join(root, file);
-    let text = 'before\nold target\nafter', dirty = false, version = 1;
+    let text = initial, dirty = false, version = 1;
     fs.writeFileSync(source, text);
     const service = new ReviewService(path.join(root, '.review'));
     for (const review of two ? ['one', 'two'] : ['one']) {
@@ -23,10 +23,70 @@ async function fixture(two = false, file = 'a.tex') {
             return false; for (const e of [...edits].reverse())
             text = text.slice(0, e.from) + e.text + text.slice(e.to); dirty = true; version++; return true; }, async save() { fs.writeFileSync(source, text); dirty = false; return true; } };
     const engine = new SourceTransactions(root, service, access), read = await engine.read(file);
-    const transaction = { id: 'transaction_test', file: file, revision: read.revision, reviewRevision: read.reviewRevision, edits: [{ from: 7, to: 17, before: 'old target', text: 'new target with detail' }], anchors: read.threads.map(t => ({ review: t.review, thread: t.id, from: 7, to: 29, quote: 'new target with detail' })) };
+    const from = text.indexOf('old target');
+    const transaction = { id: 'transaction_test', file: file, revision: read.revision, reviewRevision: read.reviewRevision, edits: [{ from, to: from + 10, before: 'old target', text: 'new target with detail' }], anchors: read.threads.map(t => ({ review: t.review, thread: t.id, from, to: from + 22, quote: 'new target with detail' })) };
     return { root, source, service, engine, access, transaction };
 }
 describe('durable native source transactions', () => {
+    it.each([
+        ['before \nold target\nafter\n', { trimTrailingWhitespace: true }],
+        ['before\nold target\nafter', { insertFinalNewline: true }],
+        ['before\nold target\nafter\n\n', { trimFinalNewlines: true }],
+    ])('rejects save-time changes before dry run or commit can lock the review', async (text, savePolicy) => {
+        const f = await fixture(false, 'README.md', text), original = f.access.read;
+        vi.spyOn(f.access, 'read').mockImplementation(async file => ({ ...await original(file), savePolicy }));
+        const apply = vi.spyOn(f.access, 'apply'), save = vi.spyOn(f.access, 'save');
+        const log = readLog(path.join(f.root, '.review'), 'one');
+        for (const dryRun of [true, false]) {
+            await expect(f.engine.transact({ ...f.transaction, dryRun })).rejects.toMatchObject({ code: 'SAVE_WOULD_CHANGE_SOURCE' });
+            expect(f.service.transactionPending).toBe(false);
+            expect(fs.readdirSync(path.join(f.root, '.review/transactions'))).toEqual([]);
+            expect((await f.engine.read('README.md')).text).toBe(text);
+        }
+        expect(apply).not.toHaveBeenCalled(); expect(save).not.toHaveBeenCalled();
+        expect(readLog(path.join(f.root, '.review'), 'one')).toEqual(log);
+        expect(fs.readFileSync(f.source, 'utf8')).toBe(text);
+    });
+    it('accepts explicit whitespace cleanup and its recalculated comment destination', async () => {
+        const f = await fixture(false, 'README.md', 'before \nold target\nafter\n'), original = f.access.read;
+        vi.spyOn(f.access, 'read').mockImplementation(async file => ({ ...await original(file), savePolicy: { trimTrailingWhitespace: true, insertFinalNewline: true } }));
+        const result = await f.engine.transact({ ...f.transaction,
+            edits: [{ from: 6, to: 7, before: ' ', text: '' }, ...f.transaction.edits],
+            anchors: [{ review: 'one', thread: 't1', from: 7, to: 29, quote: 'new target with detail' }] });
+        expect(result.committed).toBe(true);
+        expect(fs.readFileSync(f.source, 'utf8')).toBe('before\nnew target with detail\nafter\n');
+        expect(f.service.view('one').threads[0].anchor).toMatchObject({ from: 7, to: 29, revision: result.revision });
+    });
+    it('does not publish planned anchors when save leaves a different native buffer', async () => {
+        const f = await fixture(), save = f.access.save;
+        vi.spyOn(f.access, 'save').mockImplementation(async file => {
+            await save(file);
+            vi.spyOn(f.access, 'read').mockResolvedValue({ text: 'concurrent unsaved input', dirty: true, version: 9 });
+            return true;
+        });
+        await expect(f.engine.transact(f.transaction)).rejects.toThrow('editor differs');
+        expect(f.service.transactionPending).toBe(true);
+        expect(readLog(path.join(f.root, '.review'), 'one').filter(e => e.op === 'set_anchors')).toHaveLength(0);
+        expect(fs.existsSync(path.join(f.root, '.review/transactions/pending.json'))).toBe(true);
+    });
+    it('does not save over external edits while recovering an unsaved transaction', async () => {
+        const f = await fixture(), save = vi.spyOn(f.access, 'save').mockResolvedValue(false);
+        await expect(f.engine.transact(f.transaction)).rejects.toThrow('Unable to save');
+        fs.writeFileSync(f.source, 'external edit after interruption'); save.mockClear();
+        await expect(f.engine.recover()).rejects.toThrow('no source was overwritten');
+        expect(save).not.toHaveBeenCalled();
+        expect(fs.readFileSync(f.source, 'utf8')).toBe('external edit after interruption');
+    });
+    it('does not abort or complete recovery based on a stale clean native buffer', async () => {
+        const f = await fixture(), save = vi.spyOn(f.access, 'save').mockResolvedValue(false);
+        await expect(f.engine.transact(f.transaction)).rejects.toThrow();
+        fs.writeFileSync(f.source, 'before\nnew target with detail\nafter');
+        vi.spyOn(f.access, 'read').mockResolvedValue({ text: 'before\nold target\nafter', dirty: false, version: 1 });
+        save.mockClear();
+        await expect(f.engine.recover()).rejects.toThrow('no source was overwritten');
+        expect(save).not.toHaveBeenCalled();
+        expect(fs.existsSync(path.join(f.root, '.review/transactions/pending.json'))).toBe(true);
+    });
     it.each(['a.tex', 'notes.txt', 'README.md'])('publishes %s source and explicit anchors together', async (file) => {
         const f = await fixture(false, file), old = fs.readFileSync(path.join(f.root, '.review/one.view.json'), 'utf8');
         const save = f.access.save;

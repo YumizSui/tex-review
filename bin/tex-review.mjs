@@ -16,10 +16,10 @@ try {
         request = { op: 'rename', rename: JSON.parse(fs.readFileSync(argument || 0, 'utf8')) };
     else if (operation === 'comment')
         request = { op: 'comment', comment: JSON.parse(fs.readFileSync(argument || 0, 'utf8')) };
-    else if (operation === 'recover')
-        request = { op: 'recover' };
+    else if (operation === 'recover' || operation === 'status')
+        request = { op: operation };
     else
-        throw new Error('Usage: node tex-review.mjs read <source.tex> | transact [request.json] | comment [request.json] | rename [request.json] | recover');
+        throw new Error('Usage: node tex-review.mjs read <source.tex> | transact [request.json] | comment [request.json] | rename [request.json] | recover | status');
     const response = await new Promise((resolve, reject) => {
         const socket = net.createConnection(descriptor.endpoint);
         socket.setEncoding('utf8');

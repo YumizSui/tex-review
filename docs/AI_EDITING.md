@@ -16,11 +16,39 @@ use that path with Node.js 22.12 or later:
 node /path/from/api.json/tex-review.mjs read chapters/introduction.tex
 node /path/from/api.json/tex-review.mjs transact request.json
 node /path/from/api.json/tex-review.mjs comment comment-request.json
+node /path/from/api.json/tex-review.mjs status
 ```
 
 `transact` and `comment` also accept JSON on stdin. This is same-user local IPC, using a Unix
 socket (a named pipe on Windows). It opens no TCP port and sends no manuscript to
 a remote service. Keep `.review/` out of Git.
+
+## Status and timeouts
+
+Check for `status` in `.review/api.json` capabilities. `status` reports the active
+operation, its stage and elapsed time, the queue length, recent stage events, and
+whether transaction recovery is required. It bypasses the operation queue and
+does not open documents or run recovery. Diagnostics are available while startup
+recovery is waiting for the editor. The **TeX Review API** output channel records
+the same stage events without source text or comment bodies.
+
+Document acquisition has a 5-second deadline. An acquisition timeout returns
+`DOCUMENT_OPEN_TIMEOUT`; a late document result does not resume the failed
+operation. Other requests remain serialized to preserve source and review
+consistency. Up to 64 requests can wait in the queue.
+
+Requests have a 20-second response deadline, including queue time. `QUEUE_TIMEOUT`
+with `outcome: "not_started"` means the queued request was removed without
+execution. A disconnected request that has not started is also removed.
+`OPERATION_TIMEOUT` with `outcome: "pending"` means the running operation has not
+settled. An edit or save already sent to the editor can still finish after this
+response. Its lock and recovery journal are retained until the editor reports
+the result; further requests receive `OPERATION_IN_PROGRESS` while that operation
+is settling. Use `status`, then retry the same ID and exact request to retrieve
+its result. A timeout does not establish that a transaction was aborted.
+
+These deadlines and diagnostics require the extension host's event loop to be
+responsive. They do not cancel VS Code's document, edit, or save RPCs.
 
 ## Read
 
@@ -63,6 +91,23 @@ Set `"dryRun": true` to validate the complete transaction without changing sourc
 or review history. Use a new ID for a different transaction. If a request times
 out or disconnects, retry **the same ID and exact request**, rather than creating
 a second transaction. The last 100 results are retained for idempotent retries.
+
+### Save-time whitespace changes
+
+Both dry runs and commits check the resulting text against the source's effective
+`files.trimTrailingWhitespace`, `files.insertFinalNewline`, and
+`files.trimFinalNewlines` settings. If saving would change that text, the API
+returns `SAVE_WOULD_CHANGE_SOURCE` before editing or creating a recovery journal.
+The error names the conflicting settings. Include the whitespace changes as
+explicit edits and recalculate comment destinations, or disable the named
+settings for that source; then read again and prepare a new request. The
+extension does not change editor settings or silently move explicit destinations.
+
+This preflight does not run formatters or other extensions' save hooks. If an
+unexpected save hook or concurrent edit changes the result, the transaction
+retains its recovery journal and does not publish the planned comment anchors.
+Success requires both the clean native buffer and the saved file to match the
+planned text.
 
 ## Comment operations
 
@@ -233,7 +278,9 @@ node /path/from/api.json/tex-review.mjs recover
 
 If unrelated editing occurred after an interruption, recovery retains the journal
 and refuses to overwrite that editing. Resolve the reported conflict before
-submitting another transaction. Direct filesystem readers may observe the brief
+submitting another transaction. Changing the file on disk alone does not reload
+an already cached editor buffer. Recovery verifies both versions, and will not
+save over unrelated disk edits or discard unsaved editor input. Direct filesystem readers may observe the brief
 interval between source and log writes; API readers are serialized with commits.
 A process interruption is recoverable; arbitrary external changes cannot be made
 transactional by this API.
