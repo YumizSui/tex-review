@@ -47,13 +47,18 @@ report the blocker without publishing another version.
 
 1. Complete the relevant tests, compilation, UI interaction checks, and package
    inspection. Select the release batch and version using the rules above.
-2. Push to `main` only if authorized. With Open VSX publication authorized, run
-   **Actions → Publish to Open VSX → Run workflow** for the validated commit,
-   entering its exact package version.
-3. Reuse that run's `tex-review-release` VSIX for the Visual Studio Marketplace
-   only when publication there is also authorized.
-4. Verify each authorized public listing and its version. Cursor search may
-   update later; do not claim discovery is confirmed before checking it.
+2. Push the validated commit to `main` only if authorized. When publication to
+   both registries is authorized, publish a stable GitHub Release with the
+   matching `v<version>` tag at that commit. The **Publish TeX Review Studio**
+   workflow tests and packages the tagged source once, then sends the same
+   `tex-review-release` VSIX to each registry. Drafts and prereleases do not
+   trigger registry publication.
+3. If only Open VSX publication is authorized, use **Actions → Publish TeX
+   Review Studio → Run workflow** on `main` and enter its exact package version.
+   For a Marketplace-only release, upload the validated VSIX in Marketplace.
+4. Verify both the workflow results and each authorized listing's version. If
+   one registry fails, rerun the failed job to reuse the original VSIX. Cursor
+   search may update later; check it separately when verifying discovery.
 
 ## One-time Open VSX setup
 
@@ -69,9 +74,19 @@ Register this trusted publisher for the `tex-review` extension:
 | Workflow | `openvsx-publish.yml` |
 | Environment | `openvsx` |
 
-Restrict the GitHub `openvsx` environment to the `main` branch. Only the publish
-job requests an OIDC token. No Open VSX personal access token is needed.
-The publishing CLI is installed from the lockfile with the repository’s dependency
-overrides; publishing does not download an unpinned CLI.
+Restrict the GitHub `openvsx` environment to the `main` branch and `v*.*.*`
+tags. Only the publish job requests an OIDC token. No Open VSX personal access
+token is needed.
 
 See the [Open VSX trusted publishing guide](https://github.com/eclipse-openvsx/openvsx/wiki/Trusted-Publishing).
+
+## One-time Visual Studio Marketplace setup
+
+In **Manage Publishers & Extensions → yumizsui → Trusted Publishing**, register
+`YumizSui/tex-review`, workflow `openvsx-publish.yml`, environment `marketplace`.
+Restrict the GitHub `marketplace` environment to `v*.*.*` tags. The Marketplace
+job uses `vsce publish --oidc` and only that job requests its publishing token.
+The Marketplace job uses a separate lockfile so that the packaging and Open
+VSX jobs can keep using the project's existing dependencies.
+
+See the [Marketplace trusted publishing guide](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publish-with-github-actions-and-trusted-publishing).

@@ -1,0 +1,8 @@
+{
+  "name": "tex-review-marketplace-publisher",
+  "version": "1.0.0",
+  "private": true,
+  "devDependencies": {
+    "@vscode/vsce": "4.1.0"
+  }
+}

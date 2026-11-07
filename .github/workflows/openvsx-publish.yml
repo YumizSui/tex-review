@@ -1,10 +1,12 @@
-name: Publish to Open VSX
+name: Publish TeX Review Studio
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       version:
-        description: Package version to publish (must match package.json)
+        description: Package version to publish to Open VSX from main
         required: true
         type: string
 
@@ -17,15 +19,33 @@ concurrency:
 
 jobs:
   build:
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'release' && !github.event.release.prerelease) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
-      - name: Check requested version
+      - name: Check release tag and version
+        if: github.event_name == 'release'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+          node -e '
+            const { version } = require("./package.json");
+            if (!/^\d+\.\d+\.\d+$/.test(version) || process.env.RELEASE_TAG !== `v${version}`) {
+              throw new Error("Release tag must match the stable package version");
+            }
+          '
+      - name: Check requested version for manual publication
+        if: github.event_name == 'workflow_dispatch'
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         run: node -e 'if (require("./package.json").version !== process.env.RELEASE_VERSION) throw new Error("Requested version does not match package.json")'
@@ -49,6 +69,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -60,3 +82,30 @@ jobs:
           path: releases
       - name: Publish with a short-lived Open VSX credential
         run: npm run publish:openvsx
+
+  publish-marketplace:
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: marketplace
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: .github/marketplace/package-lock.json
+      - run: npm ci --ignore-scripts
+        working-directory: .github/marketplace
+      - uses: actions/download-artifact@v4
+        with:
+          name: tex-review-release
+          path: releases
+      - name: Publish with a short-lived Visual Studio Marketplace credential
+        working-directory: .github/marketplace
+        run: npm exec -- vsce publish --oidc --packagePath "$GITHUB_WORKSPACE/releases/tex-review.vsix"
